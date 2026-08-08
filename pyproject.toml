@@ -1,0 +1,19 @@
+[project]
+name = "graphl"
+version = "0.1.0"
+description = "Research-grade benchmark for evaluating how accurately OpenAI vision LLMs extract structured data from chart images — 22 chart types, 4 models, 3 resolutions, with MLFlow experiment tracking."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic-ai[openai]>=0.4.0",
+    "openai>=1.0.0",
+    "plotly>=5.18.0",
+    "kaleido==0.2.1",
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "mlflow>=2.15.0",
+    "prefect>=3.0.0",
+    "python-dotenv>=1.0.0",
+    "pillow>=10.0.0",
+    "httpx>=0.24.0",
+]
