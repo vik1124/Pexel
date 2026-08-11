@@ -5,7 +5,7 @@ description = "Research-grade benchmark for evaluating how accurately OpenAI vis
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "pydantic-ai[openai]>=0.4.0",
+    "pydantic-ai[openai]>=2.27.0",
     "openai>=1.0.0",
     "plotly>=5.18.0",
     "kaleido==0.2.1",

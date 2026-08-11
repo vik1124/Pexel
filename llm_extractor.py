@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import os
+import asyncio
 import time
 from pathlib import Path
 from typing import Any
+from dotenv import load_dotenv
 
 from pydantic_ai import Agent, BinaryContent
 from pydantic_ai.models.openai import OpenAIChatModel
@@ -191,8 +193,7 @@ _SYSTEM_PROMPT = (
 async def extract_chart_data(
     image_path: Path,
     chart_type: str,
-    model_name: str,
-    api_key: str,
+    model_name: str = "openai:gpt-5.5",
 ) -> tuple[Any | None, dict]:
     """
     Run the LLM extraction for one (image, chart_type, model) combination.
@@ -205,15 +206,10 @@ async def extract_chart_data(
     schema = _SCHEMAS[chart_type]
     prompt = _PROMPTS[chart_type]
 
-    if api_key:
-        os.environ.setdefault("OPENAI_API_KEY", api_key)
-
-    provider = OpenAIProvider(api_key=api_key)
-    model = OpenAIChatModel(model_name, provider=provider)
 
     agent: Agent = Agent(
-        model,
-        result_type=schema,
+        model_name,
+        output_type=schema,
         system_prompt=_SYSTEM_PROMPT,
     )
 
@@ -229,7 +225,7 @@ async def extract_chart_data(
         )
         elapsed = time.perf_counter() - start
 
-        usage = result.usage()
+        usage = result.usage
         req  = getattr(usage, "request_tokens",  None) or getattr(usage, "input_tokens",  0) or 0
         resp = getattr(usage, "response_tokens", None) or getattr(usage, "output_tokens", 0) or 0
         metadata: dict = {
@@ -242,10 +238,12 @@ async def extract_chart_data(
             "chart_type":        chart_type,
             "image_path":        str(image_path),
         }
-        return result.data, metadata
+        print(result.output, metadata)
+        return result.output, metadata
 
     except Exception as exc:
         elapsed = time.perf_counter() - start
+        print(exc)
         return None, {
             "success":           False,
             "error":             str(exc),
@@ -257,3 +255,9 @@ async def extract_chart_data(
             "chart_type":        chart_type,
             "image_path":        str(image_path),
         }
+
+
+
+if __name__ == "__main__":
+    load_dotenv()
+    asyncio.run(extract_chart_data(Path("output/charts/high/bar_horizontal.png"), "bar_horizontal"))
