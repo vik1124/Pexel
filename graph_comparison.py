@@ -7,12 +7,14 @@ from prefect import flow, task
 from prefect.artifacts import create_table_artifact
 import config as cfg
 
+import pandas as pd
+
 import os
 
 from dotenv import load_dotenv
 
 from llm_extractor import extract_chart_data
-from evaluator import evaluate
+from evaluator import evaluate_detail
 from mlflow_tracker import log_experiment_run, log_llm_call, setup_mlflow
 
 @task(
@@ -41,7 +43,7 @@ async def extract_and_evaluate(
 
 
     if llm_meta["success"] and extracted is not None:
-        metrics = evaluate(chart.chart_type, chart.ground_truth, extracted)
+        metrics, comparison_rows = evaluate_detail(chart.chart_type, chart.ground_truth, extracted)
         print(
             f" P={metrics['precision']:.2f}  R={metrics['recall']:.2f}"
             f"  F1={metrics['f1']:.2f}  tokens={llm_meta['total_tokens']}"
@@ -51,22 +53,36 @@ async def extract_and_evaluate(
             "precision": 0.0, "recall": 0.0, "f1": 0.0, "accuracy": 0.0,
             "tp": 0, "fp": 0, "fn": 0, "total_gt": 0,
         }
+        comparison_rows = []
         print(f" FAILED: {llm_meta.get('error', '?')[:80]}")
 
-    log_llm_call(model=model, chart_type=chart.chart_type, resolution=resolution, llm_meta=llm_meta)
-    run_id = log_experiment_run(
-        model=model, chart_type=chart.chart_type, resolution=resolution,
-        width=width, height=height,
-        metrics=metrics, llm_meta=llm_meta,
-        ground_truth=chart.ground_truth, extracted=extracted,
-        image_path=image_path,
+    artifact_key = f"{chart.chart_type}-{resolution}".replace("_", "-")
+    create_table_artifact(
+        key=artifact_key,
+        table=comparison_rows,
+        description=(
+            f"{chart.chart_type} | {resolution} | {model} — "
+            f"P={metrics['precision']:.2f} R={metrics['recall']:.2f} F1={metrics['f1']:.2f} "
+            f"(TP={metrics['tp']} FP={metrics['fp']} FN={metrics['fn']})"
+        ),
     )
+    pd.DataFrame(comparison_rows).to_csv(cfg.CHARTS_DIR / resolution / f"{chart.chart_type}.csv",index=False)
+    
+
+    # log_llm_call(model=model, chart_type=chart.chart_type, resolution=resolution, llm_meta=llm_meta)
+    # run_id = log_experiment_run(
+    #     model=model, chart_type=chart.chart_type, resolution=resolution,
+    #     width=width, height=height,
+    #     metrics=metrics, llm_meta=llm_meta,
+    #     ground_truth=chart.ground_truth, extracted=extracted,
+    #     image_path=image_path,
+    # )
 
     result = {
         "model":         model,
         "chart_type":    chart.chart_type,
         "resolution":    resolution,
-        "mlflow_run_id": run_id,
+        # "mlflow_run_id": run_id,
         **metrics,
         "latency_s":    llm_meta.get("latency_seconds", 0),
         "total_tokens": llm_meta.get("total_tokens", 0),

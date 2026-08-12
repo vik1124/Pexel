@@ -339,7 +339,6 @@ def _match(
     matched_gt   = [False] * len(gt_slots)
     matched_pred = [False] * len(pred_slots)
 
-    # Collect only candidate TP pairs (label close enough AND value close enough)
     tp_pairs: list[tuple[float, int, int]] = []
     for pi, (pl, pv) in enumerate(pred_slots):
         for gi, (gl, gv) in enumerate(gt_slots):
@@ -352,7 +351,6 @@ def _match(
             if sim >= LABEL_SIMILARITY_THRESHOLD and _within(gv, pv):
                 tp_pairs.append((sim, pi, gi))
 
-    # Greedy assignment — highest-similarity TP pairs first
     tp_pairs.sort(reverse=True)
     tp = 0
     for _, pi, gi in tp_pairs:
@@ -362,9 +360,80 @@ def _match(
         matched_pred[pi] = True
         matched_gt[gi]   = True
 
-    fp = sum(1 for m in matched_pred if not m)   # unmatched or wrong-value predictions
-    fn = sum(1 for m in matched_gt   if not m)   # unmatched or wrong-value GT slots
+    fp = sum(1 for m in matched_pred if not m)
+    fn = sum(1 for m in matched_gt   if not m)
     return tp, fp, fn
+
+
+def _match_detail(
+    gt_slots:   list[Slot],
+    pred_slots: list[Slot],
+) -> tuple[int, int, int, list[dict]]:
+    """Same as _match but also returns per-slot comparison rows for human review."""
+    matched_gt   = [False] * len(gt_slots)
+    matched_pred = [False] * len(pred_slots)
+
+    tp_pairs: list[tuple[float, int, int]] = []
+    for pi, (pl, pv) in enumerate(pred_slots):
+        for gi, (gl, gv) in enumerate(gt_slots):
+            if pl is not None and gl is not None:
+                sim = _sim(pl, gl)
+            else:
+                denom = max(abs(gv), abs(pv), 1e-9)
+                sim = max(0.0, 1.0 - abs(gv - pv) / denom)
+
+            if sim >= LABEL_SIMILARITY_THRESHOLD and _within(gv, pv):
+                tp_pairs.append((sim, pi, gi))
+
+    tp_pairs.sort(reverse=True)
+    tp = 0
+    matched_pairs: list[tuple[int, int]] = []
+    for _, pi, gi in tp_pairs:
+        if matched_pred[pi] or matched_gt[gi]:
+            continue
+        tp += 1
+        matched_pred[pi] = True
+        matched_gt[gi]   = True
+        matched_pairs.append((gi, pi))
+
+    rows: list[dict] = []
+
+    for gi, pi in matched_pairs:
+        gl, gv = gt_slots[gi]
+        pl, pv = pred_slots[pi]
+        rows.append({
+            "status":          "match",
+            "label":           gl or pl or "",
+            "gt_value":        gv,
+            "extracted_value": pv,
+            "diff":            round(pv - gv, 4),
+        })
+
+    for gi, matched in enumerate(matched_gt):
+        if not matched:
+            gl, gv = gt_slots[gi]
+            rows.append({
+                "status":          "missed (GT only)",
+                "label":           gl or "",
+                "gt_value":        gv,
+                "extracted_value": "",
+                "diff":            "",
+            })
+
+    for pi, matched in enumerate(matched_pred):
+        if not matched:
+            pl, pv = pred_slots[pi]
+            rows.append({
+                "status":          "extra (pred only)",
+                "label":           pl or "",
+                "gt_value":        "",
+                "extracted_value": pv,
+                "diff":            "",
+            })
+
+    fp = sum(1 for m in matched_pred if not m)
+    fn = sum(1 for m in matched_gt   if not m)
+    return tp, fp, fn, rows
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -383,3 +452,26 @@ def evaluate(chart_type: str, ground_truth: dict, extracted: Any) -> dict:
 
     tp, fp, fn = _match(gt_s, pred_s)
     return _metrics(tp, fp, fn)
+
+
+def evaluate_detail(
+    chart_type: str, ground_truth: dict, extracted: Any
+) -> tuple[dict, list[dict]]:
+    """
+    Like evaluate() but also returns per-slot comparison rows for human review.
+
+    Returns (metrics_dict, rows) where rows is a list of dicts suitable for
+    create_table_artifact — each row has: status, label, gt_value, extracted_value, diff.
+    """
+    gt_s   = _gt_slots(chart_type, ground_truth)
+    pred_s = _pred_slots(chart_type, extracted)
+
+    if not gt_s:
+        rows = [
+            {"status": "extra (pred only)", "label": pl or "", "gt_value": "", "extracted_value": pv, "diff": ""}
+            for pl, pv in pred_s
+        ]
+        return _metrics(0, len(pred_s), 0), rows
+
+    tp, fp, fn, rows = _match_detail(gt_s, pred_s)
+    return _metrics(tp, fp, fn), rows

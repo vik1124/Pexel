@@ -11,3 +11,8 @@ wheels/
 
 # config
 .env
+
+
+# Output
+output/
+mlruns/
