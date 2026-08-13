@@ -1,18 +1,19 @@
-from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 from typing import Dict
 import plotly.graph_objects as go
 from pathlib import Path
-
+from pydantic import BaseModel
 
 from config import RESOLUTIONS, CHARTS_DIR
 
 
-@dataclass
 class Chart(ABC):
-    chart_type: str
-    ground_truth: Dict = field(default_factory=dict)
-    fig: go.Figure = None
+
+    def __init__(self, chart_type: str):
+        self.chart_type = chart_type
+        self.ground_truth: BaseModel = None
+        self.fig: go.Figure = None
+        self.extraction_class: type[BaseModel] = None
 
     @abstractmethod
     def generate_plot(self) -> "Chart":

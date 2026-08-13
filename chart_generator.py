@@ -2,14 +2,35 @@
 
 from __future__ import annotations
 
+import hashlib
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from pathlib import Path
 from prefect import task
-from prefect.cache_policies import TASK_SOURCE, INPUTS
 from chart import Chart
+from schemas import (
+    AreaChartExtraction, AreaDataPoint,
+    BarChartExtraction, BarDataPoint,
+    BoxPlotExtraction, BoxGroup,
+    BubbleChartExtraction, BubblePoint,
+    CandlestickExtraction, CandlestickCandle,
+    DualAxisExtraction, DualAxisPoint,
+    FunnelExtraction, FunnelStage,
+    HeatmapExtraction, HeatmapCell,
+    HistogramExtraction, HistogramBin,
+    LineChartExtraction, LineDataPoint,
+    PieChartExtraction, PieSlice,
+    RadarExtraction, RadarSeries, RadarPoint,
+    ScatterChartExtraction, ScatterPoint,
+    StackedBarExtraction, StackedBarPoint,
+    SubplotsExtraction, SubplotPanel,
+    SurfaceExtraction, SurfacePoint,
+    TreemapExtraction, TreemapNode,
+    ViolinExtraction, ViolinGroup,
+    WaterfallExtraction, WaterfallBar,
+)
 
-from typing import Dict
 
 np.random.seed(42)
 
@@ -26,7 +47,9 @@ _GRID = dict(showgrid=True, gridcolor="#e0e0e0", gridwidth=1)
 
 class BarVerticalChart(Chart):
     """Apple FY-2023 revenue by product segment ($B)."""
-    def __init__(self): super().__init__(chart_type="bar_vertical")
+    def __init__(self):
+        super().__init__(chart_type="bar_vertical")
+        self.extraction_class = BarChartExtraction
 
     def generate_plot(self) -> "BarVerticalChart":
         segments = ["iPhone", "Mac", "iPad", "Wearables", "Services"]
@@ -40,13 +63,15 @@ class BarVerticalChart(Chart):
             xaxis_title="Segment", yaxis_title="Revenue ($B)",
             xaxis=dict(showgrid=False), yaxis=dict(**_GRID, range=[0, 230]), **_L,
         )
-        self.ground_truth = {"chart_type": "bar_vertical", "data": dict(zip(segments, values))}
+        self.ground_truth = BarChartExtraction(data_points=[BarDataPoint(label=s, value=v) for s, v in zip(segments, values)])
         return self
 
 
 class BarHorizontalChart(Chart):
     """Top-8 economies by GDP 2023 (World Bank, $T)."""
-    def __init__(self): super().__init__(chart_type="bar_horizontal")
+    def __init__(self):
+        super().__init__(chart_type="bar_horizontal")
+        self.extraction_class = BarChartExtraction
 
     def generate_plot(self) -> "BarHorizontalChart":
         countries = ["USA", "China", "Germany", "Japan", "India", "UK", "France", "Brazil"]
@@ -62,13 +87,15 @@ class BarHorizontalChart(Chart):
             xaxis=dict(**_GRID, range=[0, 31]),
             yaxis=dict(showgrid=False, autorange="reversed"), **_L,
         )
-        self.ground_truth = {"chart_type": "bar_horizontal", "data": dict(zip(countries, gdp))}
+        self.ground_truth = BarChartExtraction(data_points=[BarDataPoint(label=c, value=v) for c, v in zip(countries, gdp)])
         return self
 
 
 class LineChart(Chart):
     """S&P 500 and NASDAQ 100 monthly closing values Jan–Dec 2023."""
-    def __init__(self): super().__init__(chart_type="line")
+    def __init__(self):
+        super().__init__(chart_type="line")
+        self.extraction_class = LineChartExtraction
 
     def generate_plot(self) -> "LineChart":
         months = list(range(1, 13))
@@ -84,19 +111,19 @@ class LineChart(Chart):
             xaxis_title="Month", yaxis_title="Index Level",
             xaxis=dict(**_GRID, dtick=1), yaxis=dict(**_GRID), **_L,
         )
-        self.ground_truth = {
-            "chart_type": "line",
-            "series": {
-                "S&P 500":    {str(m): v for m, v in zip(months, sp500)},
-                "NASDAQ 100": {str(m): v for m, v in zip(months, ndq)},
-            },
-        }
+        self.ground_truth = LineChartExtraction(data_points=[
+            LineDataPoint(series="S&P 500", x=float(m), y=v) for m, v in zip(months, sp500)
+        ] + [
+            LineDataPoint(series="NASDAQ 100", x=float(m), y=v) for m, v in zip(months, ndq)
+        ])
         return self
 
 
 class ScatterChart(Chart):
     """BMI vs systolic blood pressure — 12 de-identified clinical records."""
-    def __init__(self): super().__init__(chart_type="scatter")
+    def __init__(self):
+        super().__init__(chart_type="scatter")
+        self.extraction_class = ScatterChartExtraction
 
     def generate_plot(self) -> "ScatterChart":
         labels = [f"P{i+1:02d}" for i in range(12)]
@@ -112,16 +139,15 @@ class ScatterChart(Chart):
             xaxis_title="BMI (kg/m²)", yaxis_title="Systolic BP (mmHg)",
             xaxis=dict(**_GRID), yaxis=dict(**_GRID), **_L,
         )
-        self.ground_truth = {
-            "chart_type": "scatter",
-            "points": [{"x": b, "y": s, "label": l} for b, s, l in zip(bmi, sbp, labels)],
-        }
+        self.ground_truth = ScatterChartExtraction(points=[ScatterPoint(x=b, y=s, label=l) for b, s, l in zip(bmi, sbp, labels)])
         return self
 
 
 class PieChart(Chart):
     """Desktop OS market share — StatCounter Jun 2024."""
-    def __init__(self): super().__init__(chart_type="pie")
+    def __init__(self):
+        super().__init__(chart_type="pie")
+        self.extraction_class = PieChartExtraction
 
     def generate_plot(self) -> "PieChart":
         labels = ["Windows", "macOS", "Linux", "ChromeOS", "Other"]
@@ -132,13 +158,15 @@ class PieChart(Chart):
             texttemplate="%{label}<br>%{percent:.1%}",
         ))
         self.fig.update_layout(title="Desktop OS Market Share  —  Jun 2024", **_L)
-        self.ground_truth = {"chart_type": "pie", "slices": dict(zip(labels, values))}
+        self.ground_truth = PieChartExtraction(slices=[PieSlice(label=l, percentage=v) for l, v in zip(labels, values)])
         return self
 
 
 class HistogramChart(Chart):
     """US population by age bracket, 2023 Census estimate (millions)."""
-    def __init__(self): super().__init__(chart_type="histogram")
+    def __init__(self):
+        super().__init__(chart_type="histogram")
+        self.extraction_class = HistogramExtraction
 
     def generate_plot(self) -> "HistogramChart":
         bins   = [(0,10,40),(10,20,42),(20,30,46),(30,40,45),(40,50,43),(50,60,44),(60,70,38),(70,999,35)]
@@ -152,16 +180,15 @@ class HistogramChart(Chart):
             xaxis=dict(showgrid=False), yaxis=dict(**_GRID, range=[0, 52]),
             bargap=0.05, **_L,
         )
-        self.ground_truth = {
-            "chart_type": "histogram",
-            "bins": [{"bin_start": b[0], "bin_end": b[1], "count": b[2]} for b in bins],
-        }
+        self.ground_truth = HistogramExtraction(bins=[HistogramBin(bin_start=b[0], bin_end=b[1], count=b[2]) for b in bins])
         return self
 
 
 class BoxChart(Chart):
     """COVID-19 ICU length of stay (days) by age group."""
-    def __init__(self): super().__init__(chart_type="box")
+    def __init__(self):
+        super().__init__(chart_type="box")
+        self.extraction_class = BoxPlotExtraction
 
     def generate_plot(self) -> "BoxChart":
         groups = {
@@ -179,13 +206,19 @@ class BoxChart(Chart):
             title="COVID-19 ICU Length of Stay (Days) by Age Group",
             yaxis_title="Days", yaxis=dict(**_GRID), **_L,
         )
-        self.ground_truth = {"chart_type": "box", "groups": groups}
+        self.ground_truth = BoxPlotExtraction(groups=[
+            BoxGroup(group=name, median=s["median"], q1=s["q1"], q3=s["q3"],
+                     lower_whisker=s["lower"], upper_whisker=s["upper"])
+            for name, s in groups.items()
+        ])
         return self
 
 
 class HeatmapChart(Chart):
     """Monthly average temperature (°C) — 4 global cities, seasonal quarters."""
-    def __init__(self): super().__init__(chart_type="heatmap")
+    def __init__(self):
+        super().__init__(chart_type="heatmap")
+        self.extraction_class = HeatmapExtraction
 
     def generate_plot(self) -> "HeatmapChart":
         cities = ["New York", "London", "Tokyo", "Dubai"]
@@ -200,13 +233,19 @@ class HeatmapChart(Chart):
             title="Average Monthly Temperature (°C) by City",
             xaxis_title="Month", yaxis_title="City", **_L,
         )
-        self.ground_truth = {"chart_type": "heatmap", "rows": cities, "cols": months, "values": values}
+        self.ground_truth = HeatmapExtraction(cells=[
+            HeatmapCell(row=city, col=month, value=val)
+            for city, row_vals in zip(cities, values)
+            for month, val in zip(months, row_vals)
+        ])
         return self
 
 
 class AreaChart(Chart):
     """UK renewable energy generation (TWh) by source  Jan–Jun 2023."""
-    def __init__(self): super().__init__(chart_type="area")
+    def __init__(self):
+        super().__init__(chart_type="area")
+        self.extraction_class = AreaChartExtraction
 
     def generate_plot(self) -> "AreaChart":
         months = [1, 2, 3, 4, 5, 6]
@@ -222,19 +261,19 @@ class AreaChart(Chart):
             xaxis_title="Month", yaxis_title="Generation (TWh)",
             xaxis=dict(**_GRID, dtick=1), yaxis=dict(**_GRID), **_L,
         )
-        self.ground_truth = {
-            "chart_type": "area",
-            "series": {
-                "Wind":  {str(m): v for m, v in zip(months, wind)},
-                "Solar": {str(m): v for m, v in zip(months, solar)},
-            },
-        }
+        self.ground_truth = AreaChartExtraction(data_points=[
+            AreaDataPoint(series="Wind", x=float(m), y=v) for m, v in zip(months, wind)
+        ] + [
+            AreaDataPoint(series="Solar", x=float(m), y=v) for m, v in zip(months, solar)
+        ])
         return self
 
 
 class DualAxisChart(Chart):
     """Monthly US unemployment rate (%) vs total job openings (M)  Jan–Jun 2023."""
-    def __init__(self): super().__init__(chart_type="dual_axis")
+    def __init__(self):
+        super().__init__(chart_type="dual_axis")
+        self.extraction_class = DualAxisExtraction
 
     def generate_plot(self) -> "DualAxisChart":
         months   = ["Jan", "Feb", "Mar", "Apr", "May", "Jun"]
@@ -254,19 +293,19 @@ class DualAxisChart(Chart):
             title="US Job Openings vs Unemployment Rate  Jan–Jun 2023",
             xaxis_title="Month", **_L,
         )
-        self.ground_truth = {
-            "chart_type":  "dual_axis",
-            "bar_series":  "Job Openings (M)",
-            "line_series": "Unemployment Rate (%)",
-            "bar_values":  dict(zip(months, openings)),
-            "line_values": dict(zip(months, unemp)),
-        }
+        self.ground_truth = DualAxisExtraction(
+            bar_series_name="Job Openings (M)",
+            line_series_name="Unemployment Rate (%)",
+            data_points=[DualAxisPoint(x_label=m, bar_value=o, line_value=u) for m, o, u in zip(months, openings, unemp)],
+        )
         return self
 
 
 class LogScaleChart(Chart):
     """Exponential user growth for two social platforms 2015–2022 (millions)."""
-    def __init__(self): super().__init__(chart_type="log_scale")
+    def __init__(self):
+        super().__init__(chart_type="log_scale")
+        self.extraction_class = LineChartExtraction
 
     def generate_plot(self) -> "LogScaleChart":
         years  = [2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022]
@@ -284,19 +323,19 @@ class LogScaleChart(Chart):
             xaxis_title="Year", yaxis_title="Monthly Active Users (M, log scale)",
             xaxis=dict(**_GRID, dtick=1), yaxis=dict(**_GRID, type="log"), **_L,
         )
-        self.ground_truth = {
-            "chart_type": "log_scale",
-            "series": {
-                "Platform A": {str(y): v for y, v in zip(years, plat_a)},
-                "Platform B": {str(y): v for y, v in zip(years, plat_b)},
-            },
-        }
+        self.ground_truth = LineChartExtraction(data_points=[
+            LineDataPoint(series="Platform A", x=float(y), y=v) for y, v in zip(years, plat_a)
+        ] + [
+            LineDataPoint(series="Platform B", x=float(y), y=v) for y, v in zip(years, plat_b)
+        ])
         return self
 
 
 class Subplots2x2Chart(Chart):
     """Quarterly regional sales ($M) — 4 quarters × 4 regions (2×2 grid)."""
-    def __init__(self): super().__init__(chart_type="subplots_2x2")
+    def __init__(self):
+        super().__init__(chart_type="subplots_2x2")
+        self.extraction_class = SubplotsExtraction
 
     def generate_plot(self) -> "Subplots2x2Chart":
         regions  = ["North", "South", "East", "West"]
@@ -313,16 +352,18 @@ class Subplots2x2Chart(Chart):
                                       showlegend=False), row=r, col=c)
         self.fig.update_layout(title="Quarterly Regional Sales ($M) 2023", **_L)
         self.fig.update_yaxes(**_GRID)
-        self.ground_truth = {
-            "chart_type": "subplots_2x2",
-            "panels": [{"title": q, "data": dict(zip(regions, v))} for q, v in quarters.items()],
-        }
+        self.ground_truth = SubplotsExtraction(panels=[
+            SubplotPanel(panel_title=q, data_points=[BarDataPoint(label=r, value=v) for r, v in zip(regions, vals)])
+            for q, vals in quarters.items()
+        ])
         return self
 
 
 class BubbleChart(Chart):
     """GDP per capita vs life expectancy vs population — 8 countries, World Bank 2022."""
-    def __init__(self): super().__init__(chart_type="bubble")
+    def __init__(self):
+        super().__init__(chart_type="bubble")
+        self.extraction_class = BubbleChartExtraction
 
     def generate_plot(self) -> "BubbleChart":
         countries = ["USA",   "China", "India", "Germany", "Japan",  "Brazil", "Nigeria", "Mexico"]
@@ -340,17 +381,17 @@ class BubbleChart(Chart):
             xaxis_title="GDP per Capita ($)", yaxis_title="Life Expectancy (years)",
             xaxis=dict(**_GRID), yaxis=dict(**_GRID), **_L,
         )
-        self.ground_truth = {
-            "chart_type": "bubble",
-            "points": [{"label": c, "x": g, "y": l, "size": p}
-                       for c, g, l, p in zip(countries, gdp_pc, life_exp, pop_m)],
-        }
+        self.ground_truth = BubbleChartExtraction(points=[
+            BubblePoint(label=c, x=g, y=l, size=p) for c, g, l, p in zip(countries, gdp_pc, life_exp, pop_m)
+        ])
         return self
 
 
 class WaterfallChart(Chart):
     """TechCorp FY-2023 P&L waterfall ($M)."""
-    def __init__(self): super().__init__(chart_type="waterfall")
+    def __init__(self):
+        super().__init__(chart_type="waterfall")
+        self.extraction_class = WaterfallExtraction
 
     def generate_plot(self) -> "WaterfallChart":
         bars = [
@@ -376,16 +417,15 @@ class WaterfallChart(Chart):
             title="TechCorp FY-2023 P&L Waterfall ($M)",
             yaxis_title="$M", yaxis=dict(**_GRID), **_L,
         )
-        self.ground_truth = {
-            "chart_type": "waterfall",
-            "bars": [{"label": b[0], "value": b[1], "bar_type": b[2]} for b in bars],
-        }
+        self.ground_truth = WaterfallExtraction(bars=[WaterfallBar(label=b[0], value=b[1], bar_type=b[2]) for b in bars])
         return self
 
 
 class CandlestickChart(Chart):
     """AAPL-like stock OHLC data — 6 trading sessions Jan 2024."""
-    def __init__(self): super().__init__(chart_type="candlestick")
+    def __init__(self):
+        super().__init__(chart_type="candlestick")
+        self.extraction_class = CandlestickExtraction
 
     def generate_plot(self) -> "CandlestickChart":
         candles = [
@@ -408,17 +448,17 @@ class CandlestickChart(Chart):
             yaxis_title="Price ($)", xaxis_rangeslider_visible=False,
             yaxis=dict(**_GRID), **_L,
         )
-        self.ground_truth = {
-            "chart_type": "candlestick",
-            "candles": [{"date": c[0], "open": c[1], "high": c[2],
-                         "low": c[3], "close": c[4]} for c in candles],
-        }
+        self.ground_truth = CandlestickExtraction(candles=[
+            CandlestickCandle(date=c[0], open=c[1], high=c[2], low=c[3], close=c[4]) for c in candles
+        ])
         return self
 
 
 class ViolinChart(Chart):
     """Systolic BP reduction (mmHg) in a 4-arm RCT (placebo-controlled)."""
-    def __init__(self): super().__init__(chart_type="violin")
+    def __init__(self):
+        super().__init__(chart_type="violin")
+        self.extraction_class = ViolinExtraction
 
     def generate_plot(self) -> "ViolinChart":
         groups = {
@@ -439,13 +479,19 @@ class ViolinChart(Chart):
             yaxis_title="BP Reduction (mmHg)",
             yaxis=dict(**_GRID), violinmode="group", **_L,
         )
-        self.ground_truth = {"chart_type": "violin", "groups": groups}
+        self.ground_truth = ViolinExtraction(groups=[
+            ViolinGroup(group=name, median=s["median"], q1=s["q1"], q3=s["q3"],
+                        lower_whisker=s["lower"], upper_whisker=s["upper"])
+            for name, s in groups.items()
+        ])
         return self
 
 
 class RadarChart(Chart):
     """WEF Global Competitiveness metrics — USA vs Germany (score 0–100)."""
-    def __init__(self): super().__init__(chart_type="radar")
+    def __init__(self):
+        super().__init__(chart_type="radar")
+        self.extraction_class = RadarExtraction
 
     def generate_plot(self) -> "RadarChart":
         metrics  = ["Infrastructure", "Innovation", "Institutions", "Macro-stability", "Health", "Skills"]
@@ -463,19 +509,18 @@ class RadarChart(Chart):
             title="WEF Competitiveness Scores  —  USA vs Germany",
             polar=dict(radialaxis=dict(visible=True, range=[0, 100], dtick=20)), **_L,
         )
-        self.ground_truth = {
-            "chart_type": "radar",
-            "series": {
-                "USA":     dict(zip(metrics, usa_vals)),
-                "Germany": dict(zip(metrics, ger_vals)),
-            },
-        }
+        self.ground_truth = RadarExtraction(series=[
+            RadarSeries(series_name="USA", data_points=[RadarPoint(metric=m, value=v) for m, v in zip(metrics, usa_vals)]),
+            RadarSeries(series_name="Germany", data_points=[RadarPoint(metric=m, value=v) for m, v in zip(metrics, ger_vals)]),
+        ])
         return self
 
 
 class StackedBarChart(Chart):
     """Electricity generation mix by source (TWh) — 5 major economies, 2022."""
-    def __init__(self): super().__init__(chart_type="stacked_bar")
+    def __init__(self):
+        super().__init__(chart_type="stacked_bar")
+        self.extraction_class = StackedBarExtraction
 
     def generate_plot(self) -> "StackedBarChart":
         countries = ["USA", "China", "Germany", "France", "UK"]
@@ -494,16 +539,19 @@ class StackedBarChart(Chart):
             xaxis_title="Country", yaxis_title="Generation (TWh)",
             barmode="stack", yaxis=dict(**_GRID), **_L,
         )
-        self.ground_truth = {
-            "chart_type": "stacked_bar",
-            "series": {src: dict(zip(countries, vals)) for src, vals in sources.items()},
-        }
+        self.ground_truth = StackedBarExtraction(data_points=[
+            StackedBarPoint(category=c, series=src, value=v)
+            for src, vals in sources.items()
+            for c, v in zip(countries, vals)
+        ])
         return self
 
 
 class StackedBar100Chart(Chart):
     """Population age structure (%) — 5 countries with contrasting demographics."""
-    def __init__(self): super().__init__(chart_type="stacked_bar_100")
+    def __init__(self):
+        super().__init__(chart_type="stacked_bar_100")
+        self.extraction_class = StackedBarExtraction
 
     def generate_plot(self) -> "StackedBar100Chart":
         countries  = ["USA", "Japan", "India", "Nigeria", "Germany"]
@@ -523,16 +571,19 @@ class StackedBar100Chart(Chart):
             xaxis_title="Country", yaxis_title="Share (%)",
             barmode="stack", yaxis=dict(**_GRID, range=[0, 102]), **_L,
         )
-        self.ground_truth = {
-            "chart_type": "stacked_bar_100",
-            "series": {grp: dict(zip(countries, vals)) for grp, vals in age_groups.items()},
-        }
+        self.ground_truth = StackedBarExtraction(data_points=[
+            StackedBarPoint(category=c, series=grp, value=v)
+            for grp, vals in age_groups.items()
+            for c, v in zip(countries, vals)
+        ])
         return self
 
 
 class Surface3DChart(Chart):
     """Climatological surface: mean temperature (°C) over a 4×4 lat/lon grid, Jan."""
-    def __init__(self): super().__init__(chart_type="surface_3d")
+    def __init__(self):
+        super().__init__(chart_type="surface_3d")
+        self.extraction_class = SurfaceExtraction
 
     def generate_plot(self) -> "Surface3DChart":
         lat_labels = ["60°N", "30°N", "0°",  "30°S"]
@@ -549,14 +600,21 @@ class Surface3DChart(Chart):
             scene=dict(xaxis_title="Longitude", yaxis_title="Latitude", zaxis_title="Temp (°C)"),
             **_L,
         )
-        self.ground_truth = {"chart_type": "surface_3d", "lat_labels": lat_labels,
-                             "lon_labels": lon_labels, "z": z}
+        lat_numeric = [60, 30, 0, -30]
+        lon_numeric  = [0, 30, 60, 90]
+        self.ground_truth = SurfaceExtraction(sample_points=[
+            SurfacePoint(x=lon, y=lat, z=val)
+            for lat, row in zip(lat_numeric, z)
+            for lon, val in zip(lon_numeric, row)
+        ])
         return self
 
 
 class FunnelChart(Chart):
     """E-commerce conversion funnel — realistic SaaS metrics."""
-    def __init__(self): super().__init__(chart_type="funnel")
+    def __init__(self):
+        super().__init__(chart_type="funnel")
+        self.extraction_class = FunnelExtraction
 
     def generate_plot(self) -> "FunnelChart":
         stages = ["Website Visits", "Product Views", "Add to Cart",
@@ -567,16 +625,15 @@ class FunnelChart(Chart):
             marker=dict(color=["#1f77b4","#2196F3","#42A5F5","#64B5F6","#90CAF9","#BBDEFB"]),
         ))
         self.fig.update_layout(title="E-Commerce Conversion Funnel", **_L)
-        self.ground_truth = {
-            "chart_type": "funnel",
-            "stages": [{"stage": s, "value": v} for s, v in zip(stages, values)],
-        }
+        self.ground_truth = FunnelExtraction(stages=[FunnelStage(stage=s, value=v) for s, v in zip(stages, values)])
         return self
 
 
 class TreemapChart(Chart):
     """S&P 500 approximate sector market cap ($B) with top constituents, mid-2024."""
-    def __init__(self): super().__init__(chart_type="treemap")
+    def __init__(self):
+        super().__init__(chart_type="treemap")
+        self.extraction_class = TreemapExtraction
 
     def generate_plot(self) -> "TreemapChart":
         # (label, parent, value_$B)
@@ -621,10 +678,7 @@ class TreemapChart(Chart):
         self.fig.update_layout(title="S&P 500 Sector Market Cap ($B, mid-2024)", **_L)
         sectors    = {"Technology","Financials","Healthcare","Consumer Disc","Industrials","Energy"}
         leaf_nodes = [n for n in nodes if n[1] in sectors and n[2] > 0]
-        self.ground_truth = {
-            "chart_type": "treemap",
-            "nodes": [{"label": n[0], "parent": n[1], "value": n[2]} for n in leaf_nodes],
-        }
+        self.ground_truth = TreemapExtraction(nodes=[TreemapNode(label=n[0], parent=n[1], value=n[2]) for n in leaf_nodes])
         return self
 
 
@@ -663,12 +717,18 @@ def chart_factory(chart_type: str) -> Chart:
     return CHART_MAPPINGS[chart_type]()
 
 
-@task(log_prints=True, cache_policy=TASK_SOURCE + INPUTS)
-def generate_and_save_chart(chart_type: str) -> Dict:
+def _chart_cache_key(_context, parameters: dict) -> str:
+    chart_type = parameters["chart_type"]
+    file_hash = hashlib.md5(Path(__file__).read_bytes()).hexdigest()
+    return f"{chart_type}-{file_hash}"
+
+
+@task(log_prints=True, cache_key_fn=_chart_cache_key)
+def generate_and_save_chart(chart_type: str) -> str:
     chart_class = chart_factory(chart_type=chart_type)
     chart_class.generate_plot()
     chart_class.save_images()
-    return chart_class
+    return chart_type
 
 
 def generate_all_charts() -> dict[str, Chart]:

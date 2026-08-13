@@ -78,122 +78,6 @@ def _metrics(tp: int, fp: int, fn: int) -> dict:
 Slot = tuple[str | None, float]   # (label_or_None, numeric_value)
 
 
-def _gt_slots(chart_type: str, gt: dict) -> list[Slot]:
-    if chart_type in ("bar_vertical", "bar_horizontal"):
-        return [(k, float(v)) for k, v in gt["data"].items()]
-
-    if chart_type == "pie":
-        return [(k, float(v)) for k, v in gt["slices"].items()]
-
-    if chart_type in ("line", "area"):
-        slots: list[Slot] = []
-        for series, pts in gt["series"].items():
-            for x_str, y in pts.items():
-                slots.append((f"{series}|{x_str}", float(y)))
-        return slots
-
-    if chart_type == "scatter":
-        return [(p["label"], float(p["y"])) for p in gt["points"]]
-
-    if chart_type == "histogram":
-        return [(f"{b['bin_start']}-{b['bin_end']}", float(b["count"]))
-                for b in gt["bins"]]
-
-    if chart_type == "box":
-        slots = []
-        for g, s in gt["groups"].items():
-            for stat in ("median", "q1", "q3", "lower", "upper"):
-                if stat in s:
-                    slots.append((f"{g}|{stat}", float(s[stat])))
-        return slots
-
-    if chart_type == "heatmap":
-        slots = []
-        for ri, row in enumerate(gt["rows"]):
-            for ci, col in enumerate(gt["cols"]):
-                slots.append((f"{row}|{col}", float(gt["values"][ri][ci])))
-        return slots
-
-    if chart_type == "dual_axis":
-        slots = []
-        for month, val in gt["bar_values"].items():
-            slots.append((f"{month}|bar", float(val)))
-        for month, val in gt["line_values"].items():
-            slots.append((f"{month}|line", float(val)))
-        return slots
-
-    if chart_type == "log_scale":
-        slots = []
-        for series, pts in gt["series"].items():
-            for x_str, y in pts.items():
-                slots.append((f"{series}|{x_str}", float(y)))
-        return slots
-
-    if chart_type == "subplots_2x2":
-        slots = []
-        for panel in gt["panels"]:
-            for region, val in panel["data"].items():
-                slots.append((f"{panel['title']}|{region}", float(val)))
-        return slots
-
-    if chart_type == "bubble":
-        slots = []
-        for p in gt["points"]:
-            slots.append((f"{p['label']}|x",    float(p["x"])))
-            slots.append((f"{p['label']}|y",    float(p["y"])))
-            slots.append((f"{p['label']}|size", float(p["size"])))
-        return slots
-
-    if chart_type == "waterfall":
-        return [(b["label"], float(b["value"])) for b in gt["bars"]]
-
-    if chart_type == "candlestick":
-        slots = []
-        for c in gt["candles"]:
-            slots += [
-                (f"{c['date']}|open",  float(c["open"])),
-                (f"{c['date']}|high",  float(c["high"])),
-                (f"{c['date']}|low",   float(c["low"])),
-                (f"{c['date']}|close", float(c["close"])),
-            ]
-        return slots
-
-    if chart_type == "violin":
-        slots = []
-        for g, s in gt["groups"].items():
-            for stat in ("median", "q1", "q3", "lower", "upper"):
-                if stat in s:
-                    slots.append((f"{g}|{stat}", float(s[stat])))
-        return slots
-
-    if chart_type == "radar":
-        slots = []
-        for series_name, metrics in gt["series"].items():
-            for metric, val in metrics.items():
-                slots.append((f"{series_name}|{metric}", float(val)))
-        return slots
-
-    if chart_type in ("stacked_bar", "stacked_bar_100"):
-        slots = []
-        for series_name, cat_vals in gt["series"].items():
-            for cat, val in cat_vals.items():
-                slots.append((f"{series_name}|{cat}", float(val)))
-        return slots
-
-    if chart_type == "surface_3d":
-        # Unlabeled — only z values matter; lat/lon strings don't map to schema floats cleanly
-        return [(None, float(gt["z"][ri][ci]))
-                for ri in range(len(gt["lat_labels"]))
-                for ci in range(len(gt["lon_labels"]))]
-
-    if chart_type == "funnel":
-        return [(s["stage"], float(s["value"])) for s in gt["stages"]]
-
-    if chart_type == "treemap":
-        return [(f"{n['parent']}|{n['label']}", float(n["value"])) for n in gt["nodes"]]
-
-    return []
-
 
 def _pred_slots(chart_type: str, extracted: Any) -> list[Slot]:
     if extracted is None:
@@ -438,13 +322,13 @@ def _match_detail(
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def evaluate(chart_type: str, ground_truth: dict, extracted: Any) -> dict:
+def evaluate(chart_type: str, ground_truth: Any, extracted: Any) -> dict:
     """
     Compare extracted Pydantic model against ground_truth dict.
 
     Returns a dict with keys: precision, recall, f1, accuracy, tp, fp, fn, total_gt
     """
-    gt_s   = _gt_slots(chart_type, ground_truth)
+    gt_s   = _pred_slots(chart_type, ground_truth)
     pred_s = _pred_slots(chart_type, extracted)
 
     if not gt_s:
@@ -455,7 +339,7 @@ def evaluate(chart_type: str, ground_truth: dict, extracted: Any) -> dict:
 
 
 def evaluate_detail(
-    chart_type: str, ground_truth: dict, extracted: Any
+    chart_type: str, ground_truth: Any, extracted: Any
 ) -> tuple[dict, list[dict]]:
     """
     Like evaluate() but also returns per-slot comparison rows for human review.
@@ -463,7 +347,7 @@ def evaluate_detail(
     Returns (metrics_dict, rows) where rows is a list of dicts suitable for
     create_table_artifact — each row has: status, label, gt_value, extracted_value, diff.
     """
-    gt_s   = _gt_slots(chart_type, ground_truth)
+    gt_s   = _pred_slots(chart_type, ground_truth)
     pred_s = _pred_slots(chart_type, extracted)
 
     if not gt_s:

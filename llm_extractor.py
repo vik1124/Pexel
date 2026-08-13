@@ -13,56 +13,6 @@ from pydantic_ai import Agent, BinaryContent
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from schemas import (
-    AreaChartExtraction,
-    BarChartExtraction,
-    BoxPlotExtraction,
-    BubbleChartExtraction,
-    CandlestickExtraction,
-    DualAxisExtraction,
-    FunnelExtraction,
-    HeatmapExtraction,
-    HistogramExtraction,
-    LineChartExtraction,
-    PieChartExtraction,
-    RadarExtraction,
-    ScatterChartExtraction,
-    StackedBarExtraction,
-    SubplotsExtraction,
-    SurfaceExtraction,
-    TreemapExtraction,
-    ViolinExtraction,
-    WaterfallExtraction,
-)
-
-# ── Schema registry ───────────────────────────────────────────────────────────
-
-_SCHEMAS: dict[str, type] = {
-    # Original 9
-    "bar_vertical":   BarChartExtraction,
-    "bar_horizontal": BarChartExtraction,
-    "line":           LineChartExtraction,
-    "scatter":        ScatterChartExtraction,
-    "pie":            PieChartExtraction,
-    "histogram":      HistogramExtraction,
-    "box":            BoxPlotExtraction,
-    "heatmap":        HeatmapExtraction,
-    "area":           AreaChartExtraction,
-    # Extended 13
-    "dual_axis":      DualAxisExtraction,
-    "log_scale":      LineChartExtraction,   # reuses line schema
-    "subplots_2x2":   SubplotsExtraction,
-    "bubble":         BubbleChartExtraction,
-    "waterfall":      WaterfallExtraction,
-    "candlestick":    CandlestickExtraction,
-    "violin":         ViolinExtraction,
-    "radar":          RadarExtraction,
-    "stacked_bar":    StackedBarExtraction,
-    "stacked_bar_100": StackedBarExtraction,  # reuses stacked schema
-    "surface_3d":     SurfaceExtraction,
-    "funnel":         FunnelExtraction,
-    "treemap":        TreemapExtraction,
-}
 
 # ── Per-chart extraction prompts ─────────────────────────────────────────────
 
@@ -193,6 +143,7 @@ _SYSTEM_PROMPT = (
 async def extract_chart_data(
     image_path: Path,
     chart_type: str,
+    extraction_class: type,
     model_name: str = "openai:gpt-5.5",
 ) -> tuple[Any | None, dict]:
     """
@@ -203,7 +154,7 @@ async def extract_chart_data(
     extracted : Pydantic model instance or None on failure
     metadata  : dict with timing, token counts, success flag, etc.
     """
-    schema = _SCHEMAS[chart_type]
+    schema = extraction_class
     prompt = _PROMPTS[chart_type]
 
 
@@ -259,5 +210,6 @@ async def extract_chart_data(
 
 
 if __name__ == "__main__":
+    from schemas import BarChartExtraction
     load_dotenv()
-    asyncio.run(extract_chart_data(Path("output/charts/high/bar_horizontal.png"), "bar_horizontal"))
+    asyncio.run(extract_chart_data(Path("output/charts/high/bar_horizontal.png"), "bar_horizontal", BarChartExtraction))
