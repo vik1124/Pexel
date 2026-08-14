@@ -25,7 +25,7 @@ def _extract_cache_key(_context, parameters: dict) -> str:
     return f"extract/{parameters['chart_type']}/{model}/{parameters['resolution']}"
 
 def _evaluate_cache_key(_context, parameters: dict) -> str:
-    model = parameters["model"].replace(":", "_")
+    model = parameters["model"].replace(":", "__")
     return f"evaluate/{parameters['extract_data']['chart_type']}/{model}/{parameters['resolution']}"
 
 def _evaluate_llm_cache_key(_context, parameters: dict) -> str:
@@ -83,12 +83,22 @@ async def evaluate(
     llm_meta = extract_data["llm_meta"]
     chart = chart_factory(chart_type).generate_plot()
 
+    evaluator = "heuristic"
+
     if llm_meta["success"] and extracted is not None:
         metrics, comparison_rows = evaluate_detail(chart_type, chart.ground_truth, extracted)
         print(
             f" P={metrics['precision']:.2f}  R={metrics['recall']:.2f}"
             f"  F1={metrics['f1']:.2f}  tokens={llm_meta['total_tokens']}"
         )
+        if metrics['precision']!=1.0:
+            metrics, comparison_rows = await evaluate_with_llm(
+                        chart_type=chart_type,
+                        ground_truth=chart.ground_truth,
+                        extracted=extracted,
+                        model_name=model,
+                    )
+            evaluator = "llm"
     else:
         metrics = {
             "precision": 0.0, "recall": 0.0, "f1": 0.0, "accuracy": 0.0,
@@ -97,7 +107,7 @@ async def evaluate(
         comparison_rows = []
         print(f" FAILED: {llm_meta.get('error', '?')[:80]}")
 
-    artifact_key = f"{chart_type}-{resolution}-{model}".replace("_", "-").replace(":","-").replace(".","-")
+    artifact_key = f"comp-{chart_type}-{resolution}-{model}".replace("_", "-").replace(":","-").replace(".","-")
     await create_table_artifact(
         key=artifact_key,
         table=comparison_rows,
@@ -123,7 +133,7 @@ async def evaluate(
         "model":         model,
         "chart_type":    chart.chart_type,
         "resolution":    resolution,
-        "evaluator":     "heuristic",
+        "evaluator":     evaluator,
         **metrics,
         "latency_s":    llm_meta.get("latency_seconds", 0),
         "total_tokens": llm_meta.get("total_tokens", 0),
@@ -210,14 +220,14 @@ def evaluate_extraction():
             res_extract = extract.map(chart_type=futures.result(), model=model_name)
             extracted_results = res_extract.result()
             heuristic = evaluate.map(extract_data=extracted_results, model=model_name)
-            llm = evaluate_llm.map(extract_data=extracted_results, model=model_name)
-            heuristic_eval = []
-            for x in  heuristic.result():
-                if "evaluator" not in x:
-                    x["evaluator"] = "heuristic"
-                heuristic_eval.append(x)
-            results.extend(heuristic_eval)
-            results.extend(llm.result())
+            # llm = evaluate_llm.map(extract_data=extracted_results, model=model_name)
+            # heuristic_eval = []
+            # for x in  heuristic.result():
+            #     if "evaluator" not in x:
+            #         x["evaluator"] = "heuristic"
+            #     heuristic_eval.append(x)
+            results.extend(heuristic.result())
+            # results.extend(llm.result())
             print(results)
     
     create_table_artifact(

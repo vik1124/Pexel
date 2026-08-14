@@ -291,6 +291,7 @@ def _match_detail(
             "gt_value":        gv,
             "extracted_value": pv,
             "diff":            round(pv - gv, 4),
+            "comment":         "",
         })
 
     for gi, matched in enumerate(matched_gt):
@@ -302,6 +303,7 @@ def _match_detail(
                 "gt_value":        gv,
                 "extracted_value": "",
                 "diff":            "",
+                "comment":         "",
             })
 
     for pi, matched in enumerate(matched_pred):
@@ -313,6 +315,7 @@ def _match_detail(
                 "gt_value":        "",
                 "extracted_value": pv,
                 "diff":            "",
+                "comment":         "",
             })
 
     fp = sum(1 for m in matched_pred if not m)

@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
+from pydantic_ai.capabilities import Thinking
 
 from evaluator import _pred_slots, _metrics, Slot
 
@@ -19,6 +20,7 @@ class SlotComparison(BaseModel):
     gt_value: Optional[float] = Field(None, description="Ground truth value; None if extra")
     extracted_value: Optional[float] = Field(None, description="Extracted value; None if missed")
     diff: Optional[float] = Field(None, description="extracted_value - gt_value for matches")
+    comment: Optional[str] = Field(default="", description="if diff, Reason why this discrepancy happened (best guess)")
 
 
 class LLMMatchResult(BaseModel):
@@ -26,6 +28,7 @@ class LLMMatchResult(BaseModel):
     tp: int = Field(description="Correct matches")
     fp: int = Field(description="Extracted points with no GT match")
     fn: int = Field(description="GT points not found in extraction")
+    comment: Optional[str] = Field(default="", description="if tp, fp or fn !=1, Reason why this discrepancy happened (best guess)")
 
 
 _SYSTEM_PROMPT = (
@@ -49,8 +52,8 @@ def _format_slots(slots: list[Slot]) -> str:
 
 async def evaluate_with_llm(
     chart_type: str,
-    ground_truth: Any,
-    extracted: Any,
+    ground_truth: BaseModel,
+    extracted: BaseModel,
     model_name: str = "openai:gpt-5.5",
 ) -> tuple[dict, list[dict]]:
     """Semantically match GT vs extracted slots using an LLM.
@@ -76,14 +79,14 @@ async def evaluate_with_llm(
 
     prompt = (
         f"Chart type: {chart_type}\n\n"
-        f"Ground truth ({len(gt_slots)} data points):\n{_format_slots(gt_slots)}\n\n"
-        f"Extracted ({len(pred_slots)} data points):\n{_format_slots(pred_slots)}\n\n"
-        "Match each extracted point to the closest GT point. "
+        f"Ground truth :\n{ground_truth.model_dump_json()}\n\n"
+        f"Extracted :\n{extracted.model_dump_json()}\n\n"
+        "Match each extracted point to the closest Ground Truth point. "
         "Output every GT point (match or missed) and any unmatched extracted points (extra). "
         "Set tp/fp/fn counts accordingly."
     )
 
-    agent = Agent(model_name, output_type=LLMMatchResult, system_prompt=_SYSTEM_PROMPT)
+    agent = Agent(model_name, output_type=LLMMatchResult, system_prompt=_SYSTEM_PROMPT, capabilities=[Thinking(effort="high")])
     result = await agent.run(prompt)
     llm_result = result.output
 
@@ -96,6 +99,7 @@ async def evaluate_with_llm(
                 "gt_value":        cmp.gt_value,
                 "extracted_value": cmp.extracted_value,
                 "diff":            cmp.diff,
+                "comment":         cmp.comment,
             })
         elif cmp.status == "missed":
             rows.append({
@@ -104,6 +108,7 @@ async def evaluate_with_llm(
                 "gt_value":        cmp.gt_value,
                 "extracted_value": "",
                 "diff":            "",
+                "comment":         cmp.comment,
             })
         else:
             rows.append({
@@ -112,6 +117,7 @@ async def evaluate_with_llm(
                 "gt_value":        "",
                 "extracted_value": cmp.extracted_value,
                 "diff":            "",
+                "comment":         cmp.comment,
             })
 
     return _metrics(llm_result.tp, llm_result.fp, llm_result.fn), rows
