@@ -50,7 +50,7 @@ async def extract(
     Single experiment: call the vision LLM, evaluate the extraction, log to MLFlow.
     Retried up to 2 times on failure (handles transient API errors / rate limits).
     """
-    chart             = chart_factory(chart_type).generate_plot()
+    chart             = chart_factory(chart_type)
     image_path        = cfg.CHARTS_DIR / resolution / f"{chart_type}.png"
     width, height     = cfg.RESOLUTIONS[resolution]
 
@@ -81,7 +81,7 @@ async def evaluate(
     chart_type = extract_data["chart_type"]
     extracted = extract_data["extracted"]
     llm_meta = extract_data["llm_meta"]
-    chart = chart_factory(chart_type).generate_plot()
+    chart = chart_factory(chart_type)
 
     evaluator = "heuristic"
 
@@ -163,7 +163,7 @@ async def evaluate_llm(
     chart_type = extract_data["chart_type"]
     extracted  = extract_data["extracted"]
     llm_meta   = extract_data["llm_meta"]
-    chart      = chart_factory(chart_type).generate_plot()
+    chart      = chart_factory(chart_type)
 
     if llm_meta["success"] and extracted is not None:
         metrics, comparison_rows = await evaluate_with_llm(
