@@ -4,6 +4,7 @@ from chart_generator import CHART_MAPPINGS, chart_factory, generate_and_save_cha
 from pathlib import Path
 from prefect import flow, task, unmapped
 from prefect.artifacts import create_table_artifact
+from prefect.tasks import exponential_backoff
 import config as cfg
 import json
 import itertools
@@ -24,13 +25,18 @@ from evaluator import evaluate_detail
 from llm_evaluator import evaluate_with_llm
 from mlflow_tracker import log_experiment_run, log_llm_call, setup_mlflow
 
+_HERE = Path(__file__).parent
+
 def _extract_cache_key(_context, parameters: dict) -> str:
     model = parameters["model"].replace(":", "_")
-    file_hash = hashlib.md5(Path(cfg.CHARTS_DIR / parameters["resolution"] / f"{parameters['chart_type']}.png").read_bytes()).hexdigest()
-    return f"extract/{parameters['chart_type']}/{model}/{parameters['resolution']}-{file_hash}"
+    h = hashlib.md5()
+    h.update((_HERE / "llm_extractor.py").read_bytes())
+    h.update((_HERE / "schemas.py").read_bytes())
+    h.update((cfg.CHARTS_DIR / parameters["resolution"] / f"{parameters['chart_type']}.png").read_bytes())
+    return f"extract/{parameters['chart_type']}/{model}/{parameters['resolution']}-{h.hexdigest()}"
 
 def _evaluate_cache_key(_context, parameters: dict) -> str:
-    model = parameters["model"].replace(":", "_")
+    model = parameters["extract_data"]["model"].replace(":", "_")
     extracted = parameters['extract_data']
     encoded_str = extracted["extracted"].model_dump_json().encode('utf-8')
     data_hash = hashlib.md5(encoded_str).hexdigest()
@@ -39,9 +45,10 @@ def _evaluate_cache_key(_context, parameters: dict) -> str:
 
 
 @task(
-    retries=1,
+    retries=3,
     name="extract",
-    retry_delay_seconds=5,
+    retry_delay_seconds=exponential_backoff(backoff_factor=3),
+    retry_jitter_factor=1.0,
     log_prints=True,
     cache_key_fn=_extract_cache_key,
 )
@@ -77,7 +84,8 @@ async def extract(
 @task(
     retries=1,
     name="evaluate",
-    retry_delay_seconds=5,
+    retry_delay_seconds=exponential_backoff(backoff_factor=2),
+    retry_jitter_factor=1.0,
     log_prints=True,
     cache_key_fn=_evaluate_cache_key,
 )

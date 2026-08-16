@@ -130,6 +130,17 @@ _PROMPTS: dict[str, str] = {
     ),
 }
 
+# New chart types
+# "log_log_scatter":     LogLogScatterChart,
+# "line_multi_series":   LineMultiSeriesChart,
+# "dense_scatter":       DenseScatterChart,
+# "dense_line":          DenseLineChart,
+
+_PROMPTS["bar_vertical_nolabel"] = _PROMPTS["bar_vertical"]
+_PROMPTS["bar_horizontal_nolabel"] = _PROMPTS["bar_horizontal"]
+_PROMPTS["histogram_nolabel"] = _PROMPTS["histogram"]
+_PROMPTS["subplots_2x2_nolabel"] = _PROMPTS["subplots_2x2"]
+
 _SYSTEM_PROMPT = (
     "You are a precise data extraction expert that specialises in reading charts and graphs. "
     "Extract ALL visible data points as accurately as possible. "
@@ -155,7 +166,7 @@ async def extract_chart_data(
     metadata  : dict with timing, token counts, success flag, etc.
     """
     schema = extraction_class
-    prompt = _PROMPTS[chart_type]
+    prompt = _PROMPTS.get(chart_type, "")
 
 
     agent: Agent = Agent(
@@ -195,17 +206,7 @@ async def extract_chart_data(
     except Exception as exc:
         elapsed = time.perf_counter() - start
         print(exc)
-        return None, {
-            "success":           False,
-            "error":             str(exc),
-            "latency_seconds":   round(elapsed, 3),
-            "prompt_tokens":     0,
-            "completion_tokens": 0,
-            "total_tokens":      0,
-            "model":             model_name,
-            "chart_type":        chart_type,
-            "image_path":        str(image_path),
-        }
+        raise exc
 
 
 
