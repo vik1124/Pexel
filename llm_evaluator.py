@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from pydantic_ai.capabilities import Thinking
 
-from evaluator import _pred_slots, _metrics, Slot
+from evaluator import _pred_slots, _metrics
 
 
 class SlotComparison(BaseModel):
@@ -40,14 +40,6 @@ _SYSTEM_PROMPT = (
     "Output every GT point as 'match' or 'missed', and every unmatched extracted point as 'extra'. "
     "tp = number of matches, fp = number of extra, fn = number of missed."
 )
-
-
-def _format_slots(slots: list[Slot]) -> str:
-    if not slots:
-        return "  (empty)"
-    lines = [f"  [{i}] label={repr(label) if label is not None else '(none)'}  value={value}"
-             for i, (label, value) in enumerate(slots, 1)]
-    return "\n".join(lines)
 
 
 async def evaluate_with_llm(
@@ -120,4 +112,4 @@ async def evaluate_with_llm(
                 "comment":         cmp.comment,
             })
 
-    return _metrics(llm_result.tp, llm_result.fp, llm_result.fn), rows
+    return _metrics(llm_result.tp, llm_result.fp, llm_result.fn, llm_result.comment), rows

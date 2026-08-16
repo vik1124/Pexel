@@ -42,7 +42,7 @@ _GRID = dict(showgrid=True, gridcolor="#e0e0e0", gridwidth=1)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Chart subclasses
+#  Chart subclasses — labelled variants
 # ══════════════════════════════════════════════════════════════════════════════
 
 class BarVerticalChart(Chart):
@@ -626,10 +626,12 @@ class FunnelChart(Chart):
 
     def generate_plot(self) -> "FunnelChart":
         self.fig = go.Figure(go.Funnel(
-            y=self.stages, x=self.values, textinfo="value+percent initial",
+            y=self.stages, x=self.values,
+            text=[f"{v:,}" for v in self.values],
+            textinfo="text+percent initial",
             marker=dict(color=["#1f77b4","#2196F3","#42A5F5","#64B5F6","#90CAF9","#BBDEFB"]),
         ))
-        self.fig.update_layout(title="E-Commerce Conversion Funnel", **_L)
+        self.fig.update_layout(title="E-Commerce Conversion Funnel (raw visitor counts)", **_L)
         return self
 
 
@@ -668,7 +670,7 @@ class TreemapChart(Chart):
             ("Chevron",       "Energy",  280),
             ("Energy Others", "Energy", 2030),
         ]
-        sectors = {"Technology","Financials","Healthcare","Consumer Disc","Industrials","Energy"}
+        sectors    = {"Technology","Financials","Healthcare","Consumer Disc","Industrials","Energy"}
         leaf_nodes = [n for n in self.nodes if n[1] in sectors and n[2] > 0]
         self.ground_truth = TreemapExtraction(nodes=[TreemapNode(label=n[0], parent=n[1], value=n[2]) for n in leaf_nodes])
 
@@ -686,32 +688,269 @@ class TreemapChart(Chart):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  No-label variants (same data, no bar text annotations)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class BarVerticalNoLabelChart(BarVerticalChart):
+    """Same data as BarVerticalChart but no bar value annotations."""
+    def __init__(self):
+        super().__init__()
+        self.chart_type = "bar_vertical_nolabel"
+
+    def generate_plot(self) -> "BarVerticalNoLabelChart":
+        self.fig = go.Figure(go.Bar(x=self.segments, y=self.values, marker_color="steelblue"))
+        self.fig.update_layout(
+            title="Apple FY-2023 Revenue by Segment ($B)",
+            xaxis_title="Segment", yaxis_title="Revenue ($B)",
+            xaxis=dict(showgrid=False), yaxis=dict(**_GRID, range=[0, 230]), **_L,
+        )
+        return self
+
+
+class BarHorizontalNoLabelChart(BarHorizontalChart):
+    """Same data as BarHorizontalChart but no bar value annotations."""
+    def __init__(self):
+        super().__init__()
+        self.chart_type = "bar_horizontal_nolabel"
+
+    def generate_plot(self) -> "BarHorizontalNoLabelChart":
+        self.fig = go.Figure(go.Bar(
+            y=self.countries, x=self.gdp, orientation="h", marker_color="coral",
+        ))
+        self.fig.update_layout(
+            title="GDP 2023 – Top 8 Economies ($T)",
+            xaxis_title="GDP ($T)", yaxis_title="Country",
+            xaxis=dict(**_GRID, range=[0, 31]),
+            yaxis=dict(showgrid=False, autorange="reversed"), **_L,
+        )
+        return self
+
+
+class HistogramNoLabelChart(HistogramChart):
+    """Same data as HistogramChart but no bar value annotations."""
+    def __init__(self):
+        super().__init__()
+        self.chart_type = "histogram_nolabel"
+
+    def generate_plot(self) -> "HistogramNoLabelChart":
+        self.fig = go.Figure(go.Bar(x=self.labels, y=self.counts, marker_color="seagreen"))
+        self.fig.update_layout(
+            title="US Population by Age Group 2023 (Millions)",
+            xaxis_title="Age Group", yaxis_title="Population (M)",
+            xaxis=dict(showgrid=False), yaxis=dict(**_GRID, range=[0, 52]),
+            bargap=0.05, **_L,
+        )
+        return self
+
+
+class Subplots2x2NoLabelChart(Subplots2x2Chart):
+    """Same data as Subplots2x2Chart but no bar value annotations."""
+    def __init__(self):
+        super().__init__()
+        self.chart_type = "subplots_2x2_nolabel"
+
+    def generate_plot(self) -> "Subplots2x2NoLabelChart":
+        self.fig = make_subplots(rows=2, cols=2, subplot_titles=list(self.quarters.keys()))
+        for (r, c), (q, vals) in zip([(1,1),(1,2),(2,1),(2,2)], self.quarters.items()):
+            self.fig.add_trace(go.Bar(x=self.regions, y=vals, name=q, showlegend=False), row=r, col=c)
+        self.fig.update_layout(title="Quarterly Regional Sales ($M) 2023", **_L)
+        self.fig.update_yaxes(**_GRID)
+        return self
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  New chart types
+# ══════════════════════════════════════════════════════════════════════════════
+
+class LogLogScatterChart(Chart):
+    """Revenue vs market cap for 15 major tech companies — both axes log scale."""
+    def __init__(self):
+        super().__init__(chart_type="log_log_scatter")
+        self.extraction_class = ScatterChartExtraction
+        self.companies = ["Apple", "Microsoft", "Alphabet", "Amazon", "Meta",
+                          "NVIDIA", "Tesla", "Netflix", "Salesforce", "Oracle",
+                          "Adobe", "Qualcomm", "Intel", "AMD", "Broadcom"]
+        self.revenue = [394, 212, 283, 513, 117, 61, 97, 33, 31, 50, 19, 36, 54, 23, 35]   # $B
+        self.mktcap  = [2990, 2850, 1740, 1540, 1220, 1220, 790, 230, 200, 330, 260, 165, 180, 205, 510]  # $B
+        self.ground_truth = ScatterChartExtraction(points=[
+            ScatterPoint(x=float(r), y=float(m), label=c)
+            for c, r, m in zip(self.companies, self.revenue, self.mktcap)
+        ])
+
+    def generate_plot(self) -> "LogLogScatterChart":
+        self.fig = go.Figure(go.Scatter(
+            x=self.revenue, y=self.mktcap, mode="markers+text",
+            text=self.companies, textposition="top center",
+            marker=dict(size=10, color="royalblue"),
+        ))
+        self.fig.update_layout(
+            title="Tech Companies: Revenue vs Market Cap 2023 ($B, log-log scale)",
+            xaxis_title="Annual Revenue ($B, log scale)",
+            yaxis_title="Market Cap ($B, log scale)",
+            xaxis=dict(**_GRID, type="log"),
+            yaxis=dict(**_GRID, type="log"),
+            **_L,
+        )
+        return self
+
+
+class LineMultiSeriesChart(Chart):
+    """Monthly cumulative performance (base=100) for 8 asset classes, 2023."""
+    def __init__(self):
+        super().__init__(chart_type="line_multi_series")
+        self.extraction_class = LineChartExtraction
+        self.months = list(range(1, 13))
+        self.series = {
+            "US Large Cap":   [100, 97, 105, 108, 109, 116, 120, 116, 110, 107, 116, 124],
+            "Intl Developed": [100, 99, 105, 108, 109, 111, 112, 108, 104, 101, 107, 113],
+            "Emerging Mkts":  [100, 98, 102, 104, 100, 100, 100,  96,  92,  90,  94, 101],
+            "US Bonds":       [100, 97,  96,  95,  93,  95,  95,  93,  91,  90,  93,  97],
+            "Real Estate":    [100, 96, 101, 102, 100, 102, 103,  99,  95,  94,  98, 105],
+            "Gold":           [100,102, 107, 108,  99,  96,  94,  93,  96,  99,  97, 100],
+            "Commodities":    [100, 94,  97,  97,  92,  92,  91,  92,  95,  89,  83,  84],
+            "Cash (T-Bills)": [100,100, 101, 101, 102, 102, 103, 103, 104, 104, 105, 105],
+        }
+        self.ground_truth = LineChartExtraction(data_points=[
+            LineDataPoint(series=name, x=float(m), y=float(v))
+            for name, vals in self.series.items()
+            for m, v in zip(self.months, vals)
+        ])
+
+    def generate_plot(self) -> "LineMultiSeriesChart":
+        colors = ["#1f77b4","#ff7f0e","#2ca02c","#d62728","#9467bd","#8c564b","#e377c2","#7f7f7f"]
+        self.fig = go.Figure()
+        for (name, vals), color in zip(self.series.items(), colors):
+            self.fig.add_trace(go.Scatter(
+                x=self.months, y=vals, mode="lines+markers",
+                name=name, marker=dict(size=5), line=dict(width=1.5, color=color),
+            ))
+        self.fig.update_layout(
+            title="Asset Class Performance 2023 (Monthly, Base = 100)",
+            xaxis_title="Month", yaxis_title="Cumulative Return (Base = 100)",
+            xaxis=dict(**_GRID, dtick=1), yaxis=dict(**_GRID), **_L,
+        )
+        return self
+
+
+class DenseScatterChart(Chart):
+    """House size vs sale price — 50 labeled properties."""
+    def __init__(self):
+        super().__init__(chart_type="dense_scatter")
+        self.extraction_class = ScatterChartExtraction
+        self.sqft = [
+             850,  920, 1050, 1100, 1200, 1250, 1300, 1350, 1400, 1420,
+            1500, 1550, 1600, 1650, 1700, 1720, 1750, 1800, 1820, 1850,
+            1900, 1950, 2000, 2050, 2100, 2150, 2200, 2250, 2300, 2350,
+            2400, 2450, 2500, 2550, 2600, 2650, 2700, 2750, 2800, 2850,
+            2900, 2950, 3000, 3050, 3100, 3150, 3200, 3250, 3300, 3400,
+        ]
+        self.price = [
+            145, 162, 180, 195, 210, 225, 235, 248, 262, 270,
+            290, 302, 318, 330, 345, 358, 365, 380, 390, 400,
+            415, 430, 445, 458, 472, 485, 498, 512, 525, 540,
+            555, 568, 582, 595, 610, 625, 638, 652, 665, 680,
+            695, 708, 722, 735, 750, 765, 778, 792, 805, 835,
+        ]
+        self.labels = [f"H{i+1:02d}" for i in range(50)]
+        self.ground_truth = ScatterChartExtraction(points=[
+            ScatterPoint(x=float(s), y=float(p), label=l)
+            for s, p, l in zip(self.sqft, self.price, self.labels)
+        ])
+
+    def generate_plot(self) -> "DenseScatterChart":
+        self.fig = go.Figure(go.Scatter(
+            x=self.sqft, y=self.price, mode="markers+text",
+            text=self.labels, textposition="top center",
+            marker=dict(size=7, color="darkorchid"),
+            textfont=dict(size=8),
+        ))
+        self.fig.update_layout(
+            title="House Size vs Sale Price — 50 Properties ($K)",
+            xaxis_title="Size (sq ft)", yaxis_title="Sale Price ($K)",
+            xaxis=dict(**_GRID), yaxis=dict(**_GRID), **_L,
+        )
+        return self
+
+
+class DenseLineChart(Chart):
+    """Monthly mean temperature (°C) — Chicago vs Miami, Jan 2021 – Dec 2023 (36 pts/series)."""
+    def __init__(self):
+        super().__init__(chart_type="dense_line")
+        self.extraction_class = LineChartExtraction
+        self.months  = list(range(1, 37))
+        self.chicago = [
+            -5, -2,  3, 10, 17, 22, 25, 24, 19, 12,  5, -2,   # 2021
+            -5, -4,  4, 11, 17, 22, 26, 25, 20, 13,  5, -2,   # 2022
+            -6, -4,  5, 12, 18, 23, 26, 25, 20, 14,  6, -1,   # 2023
+        ]
+        self.miami = [
+            21, 22, 24, 26, 27, 29, 30, 30, 29, 28, 25, 22,   # 2021
+            22, 23, 24, 26, 28, 29, 31, 31, 30, 28, 25, 23,   # 2022
+            22, 23, 25, 27, 28, 30, 31, 31, 30, 28, 26, 23,   # 2023
+        ]
+        self.ground_truth = LineChartExtraction(data_points=[
+            LineDataPoint(series="Chicago", x=float(m), y=float(t)) for m, t in zip(self.months, self.chicago)
+        ] + [
+            LineDataPoint(series="Miami", x=float(m), y=float(t)) for m, t in zip(self.months, self.miami)
+        ])
+
+    def generate_plot(self) -> "DenseLineChart":
+        self.fig = go.Figure()
+        self.fig.add_trace(go.Scatter(
+            x=self.months, y=self.chicago, mode="lines+markers",
+            name="Chicago", marker=dict(size=4), line=dict(width=1.5, color="steelblue"),
+        ))
+        self.fig.add_trace(go.Scatter(
+            x=self.months, y=self.miami, mode="lines+markers",
+            name="Miami", marker=dict(size=4), line=dict(width=1.5, color="tomato"),
+        ))
+        self.fig.update_layout(
+            title="Monthly Mean Temperature (°C) — Chicago vs Miami, 2021–2023",
+            xaxis_title="Month index (1 = Jan 2021, 36 = Dec 2023)",
+            yaxis_title="Mean Temperature (°C)",
+            xaxis=dict(**_GRID, dtick=6), yaxis=dict(**_GRID), **_L,
+        )
+        return self
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  Registry & public API
 # ══════════════════════════════════════════════════════════════════════════════
 
 CHART_MAPPINGS: dict[str, type[Chart]] = {
-    "bar_vertical":    BarVerticalChart,
-    "bar_horizontal":  BarHorizontalChart,
-    "line":            LineChart,
-    "scatter":         ScatterChart,
-    "pie":             PieChart,
-    "histogram":       HistogramChart,
-    "box":             BoxChart,
-    "heatmap":         HeatmapChart,
-    "area":            AreaChart,
-    "dual_axis":       DualAxisChart,
-    "log_scale":       LogScaleChart,
-    "subplots_2x2":    Subplots2x2Chart,
-    "bubble":          BubbleChart,
-    "waterfall":       WaterfallChart,
-    "candlestick":     CandlestickChart,
-    "violin":          ViolinChart,
-    "radar":           RadarChart,
-    "stacked_bar":     StackedBarChart,
-    "stacked_bar_100": StackedBar100Chart,
-    "surface_3d":      Surface3DChart,
-    "funnel":          FunnelChart,
-    "treemap":         TreemapChart,
+    # Labelled originals
+    "bar_vertical":         BarVerticalChart,
+    "bar_horizontal":       BarHorizontalChart,
+    "line":                 LineChart,
+    "scatter":              ScatterChart,
+    "pie":                  PieChart,
+    "histogram":            HistogramChart,
+    "box":                  BoxChart,
+    "heatmap":              HeatmapChart,
+    "area":                 AreaChart,
+    "dual_axis":            DualAxisChart,
+    "log_scale":            LogScaleChart,
+    "subplots_2x2":         Subplots2x2Chart,
+    "bubble":               BubbleChart,
+    "waterfall":            WaterfallChart,
+    "candlestick":          CandlestickChart,
+    "violin":               ViolinChart,
+    "radar":                RadarChart,
+    "stacked_bar":          StackedBarChart,
+    "stacked_bar_100":      StackedBar100Chart,
+    "surface_3d":           Surface3DChart,
+    "funnel":               FunnelChart,
+    "treemap":              TreemapChart,
+    # No-label variants
+    "bar_vertical_nolabel":    BarVerticalNoLabelChart,
+    "bar_horizontal_nolabel":  BarHorizontalNoLabelChart,
+    "histogram_nolabel":       HistogramNoLabelChart,
+    "subplots_2x2_nolabel":    Subplots2x2NoLabelChart,
+    # New chart types
+    "log_log_scatter":     LogLogScatterChart,
+    "line_multi_series":   LineMultiSeriesChart,
+    "dense_scatter":       DenseScatterChart,
+    "dense_line":          DenseLineChart,
 }
 
 

@@ -56,7 +56,7 @@ def _within(gt: float, pred: float, tol: float = NUMERIC_TOLERANCE) -> bool:
     return abs(gt - pred) / denom <= tol
 
 
-def _metrics(tp: int, fp: int, fn: int) -> dict:
+def _metrics(tp: int, fp: int, fn: int, comment:str ="") -> dict:
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
     recall    = tp / (tp + fn) if (tp + fn) > 0 else 0.0
     f1        = (2 * precision * recall / (precision + recall)
@@ -70,6 +70,7 @@ def _metrics(tp: int, fp: int, fn: int) -> dict:
         "accuracy":  round(accuracy,  4),
         "tp": tp, "fp": fp, "fn": fn,
         "total_gt": tp + fn,
+        "comment": comment
     }
 
 
@@ -83,7 +84,7 @@ def _pred_slots(chart_type: str, extracted: Any) -> list[Slot]:
     if extracted is None:
         return []
 
-    if chart_type in ("bar_vertical", "bar_horizontal"):
+    if chart_type in ("bar_vertical", "bar_horizontal", "bar_vertical_nolabel", "bar_horizontal_nolabel"):
         assert isinstance(extracted, BarChartExtraction)
         return [(dp.label, dp.value) for dp in extracted.data_points]
 
@@ -91,7 +92,7 @@ def _pred_slots(chart_type: str, extracted: Any) -> list[Slot]:
         assert isinstance(extracted, PieChartExtraction)
         return [(s.label, s.percentage) for s in extracted.slices]
 
-    if chart_type in ("line", "area"):
+    if chart_type in ("line", "area", "line_multi_series", "dense_line"):
         model = extracted
         return [(f"{dp.series}|{dp.x}", dp.y) for dp in model.data_points]
 
@@ -99,7 +100,16 @@ def _pred_slots(chart_type: str, extracted: Any) -> list[Slot]:
         assert isinstance(extracted, ScatterChartExtraction)
         return [(p.label, p.y) for p in extracted.points]
 
-    if chart_type == "histogram":
+    if chart_type in ("log_log_scatter", "dense_scatter"):
+        assert isinstance(extracted, ScatterChartExtraction)
+        slots: list[Slot] = []
+        for p in extracted.points:
+            lbl = p.label or ""
+            slots.append((f"{lbl}|x", p.x))
+            slots.append((f"{lbl}|y", p.y))
+        return slots
+
+    if chart_type in ("histogram", "histogram_nolabel"):
         assert isinstance(extracted, HistogramExtraction)
         return [(f"{b.bin_start}-{b.bin_end}", b.count) for b in extracted.bins]
 
@@ -133,7 +143,7 @@ def _pred_slots(chart_type: str, extracted: Any) -> list[Slot]:
         assert isinstance(extracted, LineChartExtraction)
         return [(f"{dp.series}|{dp.x}", dp.y) for dp in extracted.data_points]
 
-    if chart_type == "subplots_2x2":
+    if chart_type in ("subplots_2x2", "subplots_2x2_nolabel"):
         assert isinstance(extracted, SubplotsExtraction)
         slots = []
         for panel in extracted.panels:
