@@ -113,7 +113,7 @@ async def evaluate(
                         chart_type=chart_type,
                         ground_truth=chart.ground_truth,
                         extracted=extracted,
-                        model_name=model,
+                        model_name="openai:gpt-5.6-luna",
                     )
             evaluator = "llm"
     else:
@@ -124,7 +124,7 @@ async def evaluate(
         comparison_rows = []
         print(f" FAILED: {llm_meta.get('error', '?')[:80]}")
 
-    artifact_key = f"comp-{chart_type}-{resolution}-{model}".replace("_", "-").replace(":","-").replace(".","-")
+    artifact_key = f"comp-{chart_type}-{resolution}-{model}".replace("_", "-").replace(":","-").replace(".","-").replace("/","-")
     await create_table_artifact(
         key=artifact_key,
         table=comparison_rows,
@@ -134,7 +134,7 @@ async def evaluate(
             f"(TP={metrics['tp']} FP={metrics['fp']} FN={metrics['fn']})"
         ),
     )
-    pd.DataFrame(comparison_rows).to_csv(cfg.CHARTS_DIR / resolution / f"{chart_type}.csv", index=False)
+    pd.DataFrame(comparison_rows).to_csv(cfg.CHARTS_DIR / resolution / f"{artifact_key}.csv", index=False)
     
 
     # log_llm_call(model=model, chart_type=chart.chart_type, resolution=resolution, llm_meta=llm_meta)
@@ -172,7 +172,10 @@ def evaluate_extraction():
         "openai:gpt-5.6-terra", 
         "openai:gpt-5.6-sol", 
         "anthropic:claude-sonnet-5", 
-        "anthropic:claude-opus-5"
+        "anthropic:claude-opus-5",
+        "openrouter:qwen/qwen3.8-27b",
+        # "openrouter:minimax/minimax-m3",
+        # "openrouter:moonshotai/kimi-k3"
     ]
     # for model_name in models:
     #         print(f"Running {model_name}")
@@ -195,7 +198,7 @@ def evaluate_extraction():
     )
 
     pd.DataFrame(results).to_csv(
-        cfg.CHARTS_DIR / f"high/results.csv", index=False
+        cfg.CHARTS_DIR / f"results.csv", index=False
     )
 
 

@@ -46,7 +46,7 @@ async def evaluate_with_llm(
     chart_type: str,
     ground_truth: BaseModel,
     extracted: BaseModel,
-    model_name: str = "openai:gpt-5.5",
+    model_name: str = "openai:gpt-5.6-luna",
 ) -> tuple[dict, list[dict]]:
     """Semantically match GT vs extracted slots using an LLM.
 
