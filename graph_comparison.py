@@ -174,6 +174,7 @@ def evaluate_extraction():
         "anthropic:claude-sonnet-5", 
         "anthropic:claude-opus-5",
         "openrouter:qwen/qwen3.8-27b",
+        # "openrouter:qwen/qwen3.8-max",
         # "openrouter:minimax/minimax-m3",
         # "openrouter:moonshotai/kimi-k3"
     ]
