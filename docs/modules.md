@@ -5,9 +5,7 @@
 All global constants. Import from here; never hardcode values elsewhere.
 
 ```python
-OPENAI_MODELS: list[str]          # ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini"]
 RESOLUTIONS: dict[str, (int,int)] # {"low": (400,300), "medium": (800,600), "high": (1200,900)}
-CHART_TYPES: list[str]            # all 22 chart type strings (see chart_types.md)
 
 NUMERIC_TOLERANCE = 0.10          # ±10% relative tolerance for value matching
 LABEL_SIMILARITY_THRESHOLD = 0.70 # minimum fuzzy string ratio for label match
@@ -19,9 +17,9 @@ LLM_CALLS_EXPERIMENT = "llm_calls"
 BASE_DIR   = Path(__file__).parent
 OUTPUT_DIR = BASE_DIR / "output"
 CHARTS_DIR = OUTPUT_DIR / "charts"   # PNGs land here: charts/{low,medium,high}/{type}.png
-
-MAX_CONCURRENT = 3   # max simultaneous OpenAI API calls
 ```
+
+The model list and chart type list live in `graph_comparison.py` and `chart_generator.CHART_MAPPINGS` respectively, not in `config.py`.
 
 ---
 
@@ -47,51 +45,47 @@ class Chart(ABC):
 ## chart_generator.py
 
 One concrete `Chart` subclass per chart type. Each class:
-- Calls `super().__init__(chart_type="<type>")` in `__init__`
-- Implements `generate_plot()` which sets `self.fig` and `self.ground_truth` and returns `self`
-- No extra fields — all data is hardcoded in `generate_plot()`
+- Sets `self.extraction_class` to the Pydantic schema the LLM will return
+- Sets `self.ground_truth` to an instance of that same schema (not a raw dict)
+- Implements `generate_plot()` which sets `self.fig` and returns `self`
 
 ```
-BarVerticalChart    BarHorizontalChart  LineChart       ScatterChart
-PieChart            HistogramChart      BoxChart        HeatmapChart
-AreaChart           DualAxisChart       LogScaleChart   Subplots2x2Chart
-BubbleChart         WaterfallChart      CandlestickChart ViolinChart
-RadarChart          StackedBarChart     StackedBar100Chart Surface3DChart
+BarVerticalChart    BarHorizontalChart  LineChart           ScatterChart
+PieChart            HistogramChart      BoxChart            HeatmapChart
+AreaChart           DualAxisChart       LogScaleChart       Subplots2x2Chart
+BubbleChart         WaterfallChart      CandlestickChart    ViolinChart
+RadarChart          StackedBarChart     StackedBar100Chart  Surface3DChart
 FunnelChart         TreemapChart
-```
-
-Module-level layout helpers shared by all classes:
-```python
-_L    = dict(font=..., plot_bgcolor="white", paper_bgcolor="white", margin=...)
-_GRID = dict(showgrid=True, gridcolor="#e0e0e0", gridwidth=1)
+# No-label variants:
+BarVerticalNoLabelChart  BarHorizontalNoLabelChart  HistogramNoLabelChart  Subplots2x2NoLabelChart
+# New types:
+LogLogScatterChart  LineMultiSeriesChart  DenseScatterChart  DenseLineChart
 ```
 
 ### Public API
 
 ```python
+CHART_MAPPINGS: dict[str, type[Chart]]
+# Registry of all 30 chart types → their Chart subclass.
+
 chart_factory(chart_type: str) -> Chart
-# Looks up the right subclass in _CHART_CLASSES, instantiates it (no args),
-# calls generate_plot(), and returns the populated Chart object.
-# This is the primary way to get a Chart object.
+# Instantiates the subclass, calls generate_plot(), returns the populated Chart.
 
 generate_all_charts() -> dict[str, Chart]
-# Returns {chart_type: Chart} for all 22 types. Figures and ground_truth populated.
-# Does NOT write images to disk.
+# Returns {chart_type: Chart} for all types in CHART_MAPPINGS. Does NOT write PNGs.
 
-generate_and_save_all() -> dict[str, Chart]
-# Like generate_all_charts() but also calls chart.save_images() for each chart.
-# Prints "OK {chart_type} [resolutions]" as it goes.
+@task(cache_key_fn=...)
+def generate_and_save_chart(chart_type: str) -> str
+# Prefect-cacheable task: generates and writes PNGs for one chart type.
+# Cached on hash of chart_generator.py — skipped if file hasn't changed.
 ```
 
 ### Adding a new chart type
 
-1. Write `class MyChart(Chart)` with `__init__` setting `chart_type` and `generate_plot()` setting `self.fig` and `self.ground_truth`
-2. Add `"my_chart": MyChart` to `_CHART_CLASSES`
-3. Add an extraction schema to `schemas.py`
-4. Add `"my_chart": MySchema` to `_SCHEMAS` in `llm_extractor.py`
-5. Add a prompt to `_PROMPTS` in `llm_extractor.py`
-6. Add slot converter branches in `_gt_slots()` and `_pred_slots()` in `evaluator.py`
-7. Add `"my_chart"` to `CHART_TYPES` in `config.py`
+1. Add `NewTypeExtraction(BaseModel)` to `schemas.py`
+2. Write `class NewTypeChart(Chart)` setting `self.extraction_class` and `self.ground_truth`; add to `CHART_MAPPINGS`
+3. Add `"new_type"` to `_PROMPTS` in `llm_extractor.py`
+4. Add a `_pred_slots` branch in `evaluator.py`
 
 ---
 
@@ -129,22 +123,20 @@ All `*Extraction` classes have an optional `title` field. The list/collection fi
 
 ```python
 async def extract_chart_data(
-    image_path: Path,
-    chart_type: str,
-    model_name: str,
-    api_key:    str,
+    image_path:       Path,
+    chart_type:       str,
+    extraction_class: type,   # the Pydantic schema class (from Chart.extraction_class)
+    model_name:       str,    # pydantic-ai format: "openai:gpt-5.6-luna", "anthropic:claude-sonnet-5", etc.
 ) -> tuple[Any | None, dict]:
     # Returns (pydantic_model_instance | None, metadata_dict)
     # metadata keys: success, latency_seconds, prompt_tokens, completion_tokens,
     #                total_tokens, model, chart_type, image_path, [error]
 ```
 
-Internally: creates a `pydantic_ai.Agent` per call with the schema from `_SCHEMAS[chart_type]`
+Internally: creates a `pydantic_ai.Agent` per call with `output_type=extraction_class`
 and the prompt from `_PROMPTS[chart_type]`. Passes the image as `BinaryContent`.
 
-**`_SCHEMAS`** — maps chart_type → Pydantic class (the LLM's structured output type)
-
-**`_PROMPTS`** — maps chart_type → extraction instruction string (tells the LLM what to read)
+**`_PROMPTS`** — maps chart_type → extraction instruction string
 
 **`_SYSTEM_PROMPT`** — shared system prompt emphasising accuracy and not hallucinating
 
@@ -153,16 +145,20 @@ and the prompt from `_PROMPTS[chart_type]`. Passes the image as `BinaryContent`.
 ## evaluator.py
 
 ```python
-def evaluate(chart_type: str, ground_truth: dict, extracted: Any) -> dict:
+def evaluate(chart_type: str, ground_truth: Any, extracted: Any) -> dict:
     # Returns: {precision, recall, f1, accuracy, tp, fp, fn, total_gt}
-    # extracted is a Pydantic model instance (or None → all zeros)
+    # Both ground_truth and extracted are Pydantic model instances.
+
+def evaluate_detail(chart_type: str, ground_truth: Any, extracted: Any) -> tuple[dict, list[dict]]:
+    # Like evaluate() but also returns per-slot comparison rows for human review.
+    # Each row: {status, label, gt_value, extracted_value, diff, comment}
+    # status ∈ {"match", "missed (GT only)", "extra (pred only)"}
 ```
 
 ### How matching works
 
-1. `_gt_slots(chart_type, ground_truth)` → `list[(label, value)]`
-2. `_pred_slots(chart_type, extracted)` → `list[(label, value)]`
-3. `_match(gt_slots, pred_slots)` → `(tp, fp, fn)` via greedy label-aware matching:
+1. `_pred_slots(chart_type, model_instance)` → `list[(label, value)]` — same function for both GT and extracted
+2. `_match_detail(gt_slots, pred_slots)` → `(tp, fp, fn, rows)` via greedy label-aware matching:
    - For each (pred, gt) pair: compute label similarity (fuzzy string ratio)
    - Keep pairs where `sim >= 0.70` AND `|gt - pred| / |gt| <= 0.10`
    - Sort by similarity, greedily assign (each slot matched at most once)
@@ -171,6 +167,29 @@ def evaluate(chart_type: str, ground_truth: dict, extracted: Any) -> dict:
 `_within(gt, pred)` — relative tolerance check: `|gt - pred| / |gt| <= NUMERIC_TOLERANCE`
 
 `_sim(a, b)` — `difflib.SequenceMatcher` ratio on lowercased, stripped strings
+
+---
+
+## llm_evaluator.py
+
+Semantic fallback evaluator. Used when heuristic precision < 1.0 to re-evaluate with a vision LLM.
+
+```python
+async def evaluate_with_llm(
+    chart_type:   str,
+    ground_truth: BaseModel,
+    extracted:    BaseModel,
+    model_name:   str = "openai:gpt-5.6-luna",
+) -> tuple[dict, list[dict]]:
+    # Returns (metrics_dict, comparison_rows) in same format as evaluate_detail().
+    # Uses pydantic_ai.Agent with Thinking(effort="high").
+```
+
+**`LLMMatchResult`** — structured output schema: `comparisons: list[SlotComparison]`, `tp`, `fp`, `fn`, `comment`
+
+**`SlotComparison`** — per-slot row: `status ∈ {"match", "missed", "extra"}`, `label`, `gt_value`, `extracted_value`, `diff`, `comment`
+
+The LLM is prompted to be lenient on label formatting (`"Jan"` ↔ `"January"`, `"2020"` ↔ `"2020.0"`) while still requiring values to be within 10%.
 
 ---
 
@@ -196,43 +215,38 @@ MLFlow UI: `mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5000`
 
 ---
 
-## run_experiments.py
+## graph_comparison.py
 
-Entry point for the full benchmark. Uses Prefect for concurrent execution.
+Main entry point for the full benchmark. Uses Prefect for concurrent execution.
 
 ```python
-async def benchmark_flow(
-    models:      list[str] | None = None,  # defaults to config.OPENAI_MODELS
-    chart_types: list[str] | None = None,  # defaults to config.CHART_TYPES
-    resolutions: list[str] | None = None,  # defaults to config.RESOLUTIONS
-) -> Path  # path to results_summary.csv
+@flow
+def evaluate_extraction() -> None:
+    # Generates all charts, then runs extract + evaluate for every (chart_type, model) pair.
+    # Results written to output/charts/results.csv and as Prefect table artifacts.
 ```
 
 **Tasks:**
 
-`generate_charts_task(chart_types, resolutions) -> dict[str, Chart]`
-— Generates images if any are missing (idempotent). Returns Chart objects with
-  `chart.ground_truth` populated.
-
-`run_one_task(*, model, chart, resolution) -> dict`
-— Calls `extract_chart_data`, then `evaluate`, then logs to MLFlow.
-  Retried up to 2× on failure. Rate-limited by `asyncio.Semaphore(MAX_CONCURRENT)`.
-
-`save_results_task(rows) -> Path`
-— Writes `output/results/results_summary.csv`. Prints pivot tables by
-  model×resolution and by chart_type.
-
-**Environment variables:**
-```
-OPENAI_API_KEY   required
-MODELS           comma-separated override, e.g. "gpt-4o-mini"
-CHART_TYPES      comma-separated override, e.g. "bar_vertical,pie"
-RESOLUTIONS      comma-separated override, e.g. "low,high"
-```
-
-**Quick run (subset):**
 ```python
-from run_experiments import benchmark_flow
-import asyncio
-asyncio.run(benchmark_flow(models=["gpt-4o-mini"], chart_types=["pie", "bar_vertical"]))
+@task(cache_key_fn=_extract_cache_key, retries=3)
+async def extract(chart_type: str, model: str, resolution: str = "high") -> dict:
+    # Calls extract_chart_data(). Returns {extracted, llm_meta, chart_type, model, resolution}.
+    # Cached on hash of (llm_extractor.py, schemas.py, image bytes, model, chart_type, resolution).
+
+@task(cache_key_fn=_evaluate_cache_key, retries=1)
+async def evaluate(extract_data: dict) -> dict:
+    # Runs heuristic evaluate_detail(); falls back to evaluate_with_llm() if precision < 1.0.
+    # Creates a Prefect table artifact with per-slot comparison rows.
+    # Returns metrics dict with model, chart_type, resolution, evaluator, P/R/F1, tokens.
+```
+
+**Edit the model list** by changing the `models` list inside `evaluate_extraction()` in the file.
+
+**Quick run (Python):**
+```python
+from graph_comparison import evaluate_extraction
+from dotenv import load_dotenv
+load_dotenv()
+evaluate_extraction()
 ```

@@ -210,6 +210,43 @@ async def extract_chart_data(
 
 
 
+async def extract(
+    image_path: Path,
+    extraction_class: type,
+    system_prompt: str,
+    prompt: str,
+    model_name: str = "openai:gpt-5.6-luna",
+) -> tuple[Any | None, dict]:
+    """
+    Bare extractor: all prompts passed explicitly, no internal lookups.
+    Intended for prompt-optimization workflows.
+    """
+    agent: Agent = Agent(model_name, output_type=extraction_class, system_prompt=system_prompt)
+    image_bytes = image_path.read_bytes()
+
+    start = time.perf_counter()
+    try:
+        result = await agent.run([BinaryContent(data=image_bytes, media_type="image/png"), prompt])
+        elapsed = time.perf_counter() - start
+
+        usage = result.usage
+        req  = getattr(usage, "request_tokens",  None) or getattr(usage, "input_tokens",  0) or 0
+        resp = getattr(usage, "response_tokens", None) or getattr(usage, "output_tokens", 0) or 0
+        return result.output, {
+            "success":           True,
+            "latency_seconds":   round(elapsed, 3),
+            "prompt_tokens":     req,
+            "completion_tokens": resp,
+            "total_tokens":      req + resp,
+            "model":             model_name,
+            "image_path":        str(image_path),
+        }
+    except Exception as exc:
+        elapsed = time.perf_counter() - start
+        print(exc)
+        raise
+
+
 if __name__ == "__main__":
     from schemas import BarChartExtraction
     load_dotenv()

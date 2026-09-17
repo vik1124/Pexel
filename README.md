@@ -1,6 +1,6 @@
 # Graph Data Extraction Benchmark
 
-A research-grade framework for benchmarking how accurately OpenAI vision LLMs extract structured data from chart images. Generates 22 chart types at three resolutions, runs 4 models against each, and evaluates precision/recall/F1 with full MLFlow experiment tracking.
+A research-grade framework for benchmarking how accurately vision LLMs extract structured data from chart images. Generates 30 chart types at three resolutions, runs 7 models across providers (OpenAI, Anthropic, OpenRouter), and evaluates precision/recall/F1 with Prefect orchestration and MLFlow experiment tracking.
 
 ---
 
@@ -8,20 +8,20 @@ A research-grade framework for benchmarking how accurately OpenAI vision LLMs ex
 
 ```
 graphl/
-├── config.py            # Models, chart types, resolutions, tolerance constants
+├── config.py            # Resolutions, tolerance constants, paths
 ├── schemas.py           # Pydantic models — one per chart type (LLM return types)
-├── chart_generator.py   # Generates Plotly figures + ground-truth dicts, exports PNGs
-├── llm_extractor.py     # Calls OpenAI vision models via pydantic-ai, returns typed extractions
-├── evaluator.py         # Computes TP/FP/FN/precision/recall/F1 from slot matching
+├── chart.py             # Chart ABC — generate_plot(), save_images()
+├── chart_generator.py   # 30 Chart subclasses, CHART_MAPPINGS registry, chart_factory()
+├── llm_extractor.py     # Calls vision models via pydantic-ai, returns typed extractions
+├── evaluator.py         # Heuristic slot-matching: TP/FP/FN/precision/recall/F1
+├── llm_evaluator.py     # Semantic LLM fallback evaluator (used when heuristic P < 1.0)
 ├── mlflow_tracker.py    # Logs runs and LLM call telemetry to MLFlow / SQLite
-├── run_experiments.py   # Prefect flow — orchestrates the full benchmark
-├── requirements.txt     # Python dependencies
-├── .env                 # OPENAI_API_KEY (not committed)
+├── graph_comparison.py  # Prefect flow — orchestrates the full benchmark (main entry point)
+├── pyproject.toml       # Python dependencies (managed by uv)
+├── .env                 # API keys (not committed)
 ├── mlflow.db            # SQLite MLFlow backend (auto-created)
 └── output/
-    ├── charts/          # Generated PNGs — low/ medium/ high/ subdirs
-    └── results/
-        └── results_summary.csv
+    └── charts/          # Generated PNGs — low/ medium/ high/ subdirs + results.csv
 ```
 
 ---
@@ -36,29 +36,40 @@ python -m pip install -r requirements.txt
 
 > **Note:** `kaleido==0.2.1` is required for Plotly PNG export. Newer versions may break on Windows.
 
-### 2. Set your OpenAI API key
+### 2. Set your API keys
 
-Create a `.env` file in the project root:
+Create a `.env` file in the project root with whichever providers you want to use:
 
 ```
 OPENAI_API_KEY=sk-proj-...
+ANTHROPIC_API_KEY=sk-ant-...
+OPENROUTER_API_KEY=sk-or-...
 ```
 
 ### 3. Verify the environment
 
 ```bash
-python -c "from chart_generator import generate_all_charts; print('OK')"
-python -c "from llm_extractor import _SCHEMAS; print(len(_SCHEMAS), 'schemas loaded')"
+python -c "from chart_generator import CHART_MAPPINGS; print(len(CHART_MAPPINGS), 'chart types loaded')"
+python -c "from llm_extractor import _PROMPTS; print(len(_PROMPTS), 'prompts loaded')"
 ```
 
 ---
 
 ## Generating Chart Images
 
-To regenerate all 66 PNG files (22 chart types × 3 resolutions) without running LLM experiments:
+To regenerate all PNGs (30 chart types × 3 resolutions = 90 files) without running LLM experiments:
 
 ```bash
-python -c "from chart_generator import generate_and_save_all; generate_and_save_all()"
+python -c "from chart_generator import generate_all_charts, CHART_MAPPINGS; [c.generate_plot().save_images() for c in [__import__('chart_generator').chart_factory(t) for t in CHART_MAPPINGS]]"
+```
+
+Or use the Prefect-cached task (idempotent):
+
+```python
+from graph_comparison import generate_and_save_chart
+from chart_generator import CHART_MAPPINGS
+for chart_type in CHART_MAPPINGS:
+    generate_and_save_chart(chart_type)
 ```
 
 Images are written to `output/charts/{low,medium,high}/{chart_type}.png`.
@@ -75,23 +86,23 @@ Resolutions:
 
 ## Running the Full Benchmark
 
-The runner is a [Prefect 3](https://docs.prefect.io) flow with three tasks:
+The runner is a [Prefect 3](https://docs.prefect.io) flow in `graph_comparison.py` with three task stages:
 
 | Task | Type | What it does |
 |---|---|---|
-| `generate-charts` | sync | Generates 66 PNGs; skipped if images already exist |
-| `extract-and-evaluate` | async, retries=2 | One LLM call + evaluation + MLFlow log |
-| `save-results` | sync | Writes `results_summary.csv`, prints pivot tables |
+| `generate_and_save_chart` | sync, cached | Generates PNGs for one chart type; re-skipped if chart_generator.py is unchanged |
+| `extract` | async, retries=3 | One LLM call; cached on (model, chart_type, resolution, image hash) |
+| `evaluate` | async, retries=1 | Heuristic evaluation; falls back to LLM evaluator if heuristic precision < 1.0 |
 
-All `extract-and-evaluate` tasks are submitted concurrently via `ConcurrentTaskRunner` and rate-limited to `MAX_CONCURRENT=3` simultaneous API calls.
+All `extract` and `evaluate` tasks run concurrently (Prefect submits them in parallel across all model × chart_type combinations).
 
 ### Run directly
 
 ```bash
-python run_experiments.py
+python graph_comparison.py
 ```
 
-This runs **264 experiments** (4 models × 22 chart types × 3 resolutions). Expect ~2–4 hours depending on API latency.
+This runs all combinations across the models configured in `evaluate_extraction()`. Results land in `output/charts/results.csv` and as Prefect table artifacts visible at [http://localhost:4200](http://localhost:4200).
 
 ### Run via Prefect with UI observability
 
@@ -99,53 +110,24 @@ This runs **264 experiments** (4 models × 22 chart types × 3 resolutions). Exp
 # Start the Prefect server (keep running in a separate terminal)
 prefect server start
 
-# Run the flow — progress and logs appear at http://localhost:4200
-python run_experiments.py
+# Run the flow — progress and per-slot comparison tables appear at http://localhost:4200
+python graph_comparison.py
 ```
 
-The Prefect UI shows live task state, retry events, logs per task, and a full run history.
+### Editing the model list
 
-### Partial runs with environment variable overrides
-
-Any axis of the benchmark can be overridden without editing code:
-
-```bash
-# Single model, two resolutions
-MODELS="gpt-4o-mini" RESOLUTIONS="low,high" python run_experiments.py
-
-# Subset of chart types
-CHART_TYPES="bar_vertical,pie,heatmap" python run_experiments.py
-
-# Single experiment for debugging
-MODELS="gpt-4o-mini" CHART_TYPES="bar_vertical" RESOLUTIONS="medium" python run_experiments.py
-```
-
-### Run programmatically from Python
+Open `graph_comparison.py` and edit the `models` list in `evaluate_extraction()`:
 
 ```python
-import asyncio
-from run_experiments import benchmark_flow
-
-# Full run
-asyncio.run(benchmark_flow())
-
-# Targeted run
-asyncio.run(benchmark_flow(
-    models=["gpt-4o-mini"],
-    chart_types=["bar_vertical", "pie", "heatmap"],
-    resolutions=["medium"],
-))
+models = [
+    "openai:gpt-5.5",
+    "openai:gpt-5.6-luna",
+    "anthropic:claude-sonnet-5",
+    "openrouter:qwen/qwen3.8-27b",
+]
 ```
 
-Results are saved to `output/results/results_summary.csv` and printed as pivot tables:
-
-```
-Mean metrics by model × resolution:
-                         precision  recall    f1  accuracy
-model        resolution
-gpt-4.1      high          0.xxx   0.xxx  0.xxx     0.xxx
-             low           ...
-```
+Provider prefixes (`openai:`, `anthropic:`, `openrouter:`) are handled by pydantic-ai — set the corresponding API key in `.env`.
 
 ---
 
@@ -157,9 +139,9 @@ prefect server start
 
 Opens at [http://localhost:4200](http://localhost:4200). Shows:
 - Live task status and retry events for the running flow
-- Per-task logs (each `extract-and-evaluate` task logs its P/R/F1 inline)
+- Per-task logs (each `extract` and `evaluate` task logs its P/R/F1 inline)
+- Per-run slot comparison tables (as Prefect artifacts — one per chart_type × resolution × model)
 - Full run history and task duration breakdown
-- Flow parameters used for each run
 
 The Prefect server and MLFlow UI can run simultaneously on different ports.
 
@@ -194,74 +176,37 @@ Two experiments are tracked:
 
 ## Chart Types and Ground Truth
 
-All 22 chart types are listed below. Every chart has a corresponding **ground-truth Python dict** produced alongside the Plotly figure in `chart_generator.py`. The dict keys are specific to each chart type and map directly to the slot structure used by the evaluator.
+30 chart types are registered in `CHART_MAPPINGS`. Every chart has a **ground-truth Pydantic model** stored as `Chart.ground_truth` — the same schema class that the LLM returns, which makes slot comparison straightforward. See [docs/chart_types.md](docs/chart_types.md) for per-type details.
 
-### Single-axis charts
+### Chart type groups
 
-| Chart type | Dataset | GT dict structure | DataFrame shape |
-|---|---|---|---|
-| `bar_vertical` | Apple FY-2023 revenue by segment ($B) | `{"data": {"label": value, ...}}` | (5 rows) label, value |
-| `bar_horizontal` | GDP 2023 — top 8 economies ($T) | `{"data": {"label": value, ...}}` | (8 rows) label, value |
-| `pie` | Desktop OS market share Jun 2024 | `{"slices": {"label": pct, ...}}` | (5 rows) label, percentage |
-| `histogram` | US population by age group 2023 (M) | `{"bins": [{"bin_start", "bin_end", "count"}]}` | (8 rows) bin_start, bin_end, count |
-| `funnel` | E-commerce conversion funnel | `{"stages": [{"stage", "value"}]}` | (6 rows) stage, value |
+### Labelled originals (22)
 
-### Multi-series line/area charts
+| Group | Chart types |
+|---|---|
+| Single-axis | `bar_vertical`, `bar_horizontal`, `pie`, `histogram`, `funnel` |
+| Line / area | `line`, `area`, `log_scale` |
+| Distribution | `box`, `violin` |
+| Relational | `scatter`, `bubble` |
+| Matrix | `heatmap`, `radar` |
+| Stacked | `stacked_bar`, `stacked_bar_100`, `treemap` |
+| Multi-panel | `dual_axis`, `subplots_2x2` |
+| Financial | `candlestick`, `waterfall` |
+| 3-D | `surface_3d` |
 
-| Chart type | Dataset | GT dict structure | DataFrame shape |
-|---|---|---|---|
-| `line` | S&P 500 + NASDAQ 100 monthly close 2023 | `{"series": {"name": {"x_str": y, ...}}}` | (24 rows) series, x, y |
-| `area` | UK renewable energy (Wind + Solar, TWh) Jan–Jun 2023 | `{"series": {"name": {"x_str": y, ...}}}` | (12 rows) series, x, y |
-| `log_scale` | Social platform MAU growth 2015–2022 (M) | `{"series": {"name": {"year": val, ...}}}` | (16 rows) series, year, mau |
+### No-label variants (4)
 
-### Distribution charts
+Identical charts with axis tick labels removed to test extraction without textual anchors:
+`bar_vertical_nolabel`, `bar_horizontal_nolabel`, `histogram_nolabel`, `subplots_2x2_nolabel`
 
-| Chart type | Dataset | GT dict structure | DataFrame shape |
-|---|---|---|---|
-| `box` | COVID-19 ICU length of stay by age group | `{"groups": {"name": {"median", "q1", "q3", "lower", "upper"}}}` | (4 groups × 5 stats = 20 rows) |
-| `violin` | Systolic BP reduction (mmHg) — 4-arm RCT | `{"groups": {"name": {"median", "q1", "q3", "lower", "upper"}}}` | (4 groups × 5 stats = 20 rows) |
+### New chart types (4)
 
-### Scatter / relational charts
-
-| Chart type | Dataset | GT dict structure | DataFrame shape |
-|---|---|---|---|
-| `scatter` | BMI vs systolic BP — 12 de-identified patients | `{"points": [{"x", "y", "label"}]}` | (12 rows) label, x (BMI), y (SBP) |
-| `bubble` | GDP/capita vs life expectancy vs population — 8 countries 2022 | `{"points": [{"label", "x", "y", "size"}]}` | (8 rows × 3 numeric dims = 24 slots) |
-
-### Matrix / 2-D charts
-
-| Chart type | Dataset | GT dict structure | DataFrame shape |
-|---|---|---|---|
-| `heatmap` | Mean temperature (°C) — 4 cities × 4 months | `{"rows": [...], "cols": [...], "values": [[...]]}` | (4×4 = 16 rows) city, month, temp |
-| `radar` | WEF competitiveness scores USA vs Germany | `{"series": {"name": {"metric": value, ...}}}` | (2 series × 6 metrics = 12 rows) |
-
-### Stacked / composition charts
-
-| Chart type | Dataset | GT dict structure | DataFrame shape |
-|---|---|---|---|
-| `stacked_bar` | Electricity generation mix (TWh) — 5 countries 2022 | `{"series": {"source": {"country": value, ...}}}` | (4 sources × 5 countries = 20 rows) |
-| `stacked_bar_100` | Population age structure (%) — 5 countries 2023 | `{"series": {"age_group": {"country": pct, ...}}}` | (3 groups × 5 countries = 15 rows) |
-| `treemap` | S&P 500 sector market cap ($B, mid-2024) | `{"nodes": [{"label", "parent", "value"}]}` | (21 leaf rows) label, parent, value |
-
-### Dual-axis and multi-panel
-
-| Chart type | Dataset | GT dict structure | DataFrame shape |
-|---|---|---|---|
-| `dual_axis` | US job openings (M) vs unemployment rate (%) Jan–Jun 2023 | `{"bar_values": {...}, "line_values": {...}}` | (6 rows) month, bar_value, line_value |
-| `subplots_2x2` | Quarterly regional sales ($M) — 4 quarters × 4 regions | `{"panels": [{"title", "data": {"region": value}}]}` | (4 panels × 4 regions = 16 rows) |
-
-### Financial charts
-
-| Chart type | Dataset | GT dict structure | DataFrame shape |
-|---|---|---|---|
-| `candlestick` | AAPL OHLC — 6 sessions Jan 2024 | `{"candles": [{"date", "open", "high", "low", "close"}]}` | (6 rows × 4 OHLC = 24 slots) |
-| `waterfall` | TechCorp FY-2023 P&L ($M) | `{"bars": [{"label", "value", "bar_type"}]}` | (9 rows) label, value, type |
-
-### 3-D
-
-| Chart type | Dataset | GT dict structure | DataFrame shape |
-|---|---|---|---|
-| `surface_3d` | Mean January temperature (°C) — 4×4 lat/lon grid | `{"lat_labels": [...], "lon_labels": [...], "z": [[...]]}` | (16 rows) lat, lon, temp_celsius |
+| Chart type | Description |
+|---|---|
+| `log_log_scatter` | Scatter plot with both axes on log scale |
+| `line_multi_series` | Line chart with many overlapping series |
+| `dense_scatter` | High-density scatter (many points, small markers) |
+| `dense_line` | High-density multi-series line chart |
 
 ---
 
@@ -274,46 +219,52 @@ Each chart type is reduced to a flat list of `(label, value)` slots. Labels are 
 | `LABEL_SIMILARITY_THRESHOLD` | 0.70 | Minimum fuzzy ratio for two labels to be considered the same |
 | `NUMERIC_TOLERANCE` | 0.10 | Maximum relative error for a value to count as correct (10%) |
 
-**Matching rules:**
+**Two-stage evaluation:**
+1. **Heuristic** (`evaluator.py`) — greedy slot matching. Fast and deterministic.
+2. **LLM fallback** (`llm_evaluator.py`) — if heuristic precision < 1.0, a pydantic-ai agent re-evaluates the same slots with extended thinking. It is lenient on label formatting (`"Jan"` matches `"January"`) and provides a comment explaining each discrepancy.
+
+**Heuristic matching rules:**
 - A slot is a **True Positive** only if label similarity ≥ threshold **and** value within tolerance.
-- A label match with a wrong value is a **near-miss**: it counts as both FP (bad prediction) and FN (missed ground truth) — it does NOT inflate TP.
-- Matching is greedy: highest-similarity candidate pairs are claimed first.
+- A label match with a wrong value is a **near-miss**: counts as both FP and FN — does NOT inflate TP.
+- Matching is greedy: highest-similarity pairs are claimed first.
 - `surface_3d` uses unlabeled proximity matching (no lat/lon strings in the schema).
 
 ---
 
 ## Adding a New Chart Type
 
-1. **`chart_generator.py`** — add a `_new_type() -> tuple[go.Figure, dict]` function and register it in `_GENERATORS`.
-2. **`schemas.py`** — define `NewTypeExtraction(BaseModel)` with a Pydantic model matching what the LLM should return.
-3. **`llm_extractor.py`** — add entries to `_SCHEMAS` and `_PROMPTS`.
-4. **`evaluator.py`** — add cases to `_gt_slots` and `_pred_slots`.
-5. **`config.py`** — append the key to `CHART_TYPES`.
+1. **`schemas.py`** — define `NewTypeExtraction(BaseModel)` matching what the LLM should return.
+2. **`chart_generator.py`** — add `class NewTypeChart(Chart)` with `self.extraction_class = NewTypeExtraction` and `generate_plot()` setting `self.fig` and `self.ground_truth` (as a `NewTypeExtraction` instance). Register it in `CHART_MAPPINGS`.
+3. **`llm_extractor.py`** — add an entry to `_PROMPTS`.
+4. **`evaluator.py`** — add a `_pred_slots` branch for the new chart type.
 
 ---
 
 ## Models Tested
 
-| Model | Notes |
-|---|---|
-| `gpt-4o` | Highest capability baseline |
-| `gpt-4o-mini` | Smaller / cheaper baseline |
-| `gpt-4.1` | Latest GPT-4.1 flagship |
-| `gpt-4.1-mini` | Latest GPT-4.1 efficient |
+Models are specified via pydantic-ai's `provider:model-name` string format. Edit the `models` list in `graph_comparison.py:evaluate_extraction()` to change which models run.
 
-Add or remove models in `config.py` → `OPENAI_MODELS`, or override at runtime with the `MODELS` env var.
+| Provider prefix | Example | Key needed |
+|---|---|---|
+| `openai:` | `openai:gpt-5.6-luna` | `OPENAI_API_KEY` |
+| `anthropic:` | `anthropic:claude-sonnet-5` | `ANTHROPIC_API_KEY` |
+| `openrouter:` | `openrouter:qwen/qwen3.8-27b` | `OPENROUTER_API_KEY` |
+
+Default model list (as of the most recent run):
+- `openai:gpt-5.5`, `openai:gpt-5.6-luna`, `openai:gpt-5.6-terra`, `openai:gpt-5.6-sol`
+- `anthropic:claude-sonnet-5`, `anthropic:claude-opus-5`
+- `openrouter:qwen/qwen3.8-27b`
 
 ---
 
 ## Requirements
 
+Managed via `uv` and `pyproject.toml`. Key dependencies:
+
 - Python 3.10+
-- `pydantic-ai[openai] >= 0.4.0`
-- `openai >= 1.0.0`
-- `plotly >= 5.18.0`
-- `kaleido == 0.2.1`
-- `pandas >= 2.0.0`
-- `numpy >= 1.24.0`
-- `mlflow >= 2.15.0`
+- `pydantic-ai` (multi-provider: openai, anthropic, openrouter)
+- `plotly` + `kaleido==0.2.1` (PNG export — newer kaleido versions break on Windows)
+- `pandas`, `numpy`
+- `mlflow`
 - `prefect >= 3.0.0`
-- `python-dotenv >= 1.0.0`
+- `python-dotenv`

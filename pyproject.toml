@@ -17,4 +17,5 @@ dependencies = [
     "pillow>=10.0.0",
     "httpx>=0.24.0",
     "nbformat>=5.11.1",
+    "pandoc>=2.4",
 ]

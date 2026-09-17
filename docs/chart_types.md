@@ -1,13 +1,15 @@
 # Chart Types Reference
 
-22 chart types across two groups. Each entry shows:
-- **Ground truth shape** — the dict structure stored in `Chart.ground_truth`
+30 chart types across four groups. Each entry shows:
+- **Ground truth shape** — the Pydantic model instance stored in `Chart.ground_truth` (same class as the LLM's `extraction_class`)
 - **Extraction schema** — the Pydantic class the LLM returns
-- **Evaluator slots** — how `_gt_slots()` flattens the ground truth to `(label, value)` pairs
+- **Evaluator slots** — how `_pred_slots()` flattens the model to `(label, value)` pairs (same function runs on both ground truth and extracted model)
+
+> **Note on ground truth format:** The dict structures shown below (e.g., `{"data": {"iPhone": 200.6}}`) are illustrative. The actual `Chart.ground_truth` is a Pydantic model instance (e.g., `BarChartExtraction(data_points=[BarDataPoint(label="iPhone", value=200.6), ...])`). Use `.model_dump()` to get the dict.
 
 ---
 
-## Original 9
+## Original 9 (labelled)
 
 ### bar_vertical
 Apple FY-2023 revenue by product segment.
@@ -74,7 +76,7 @@ UK renewable energy generation Jan–Jun 2023.
 
 ---
 
-## Extended 13
+## Extended 13 (labelled)
 
 ### dual_axis
 US job openings (bars, left axis) vs unemployment rate (line, right axis).
@@ -167,6 +169,30 @@ S&P 500 sector market cap $B — mid-2024. Leaf nodes only in ground truth.
 - **Ground truth:** `{"chart_type": "treemap", "nodes": [{"label": "Apple", "parent": "Technology", "value": 3050}, ...]}`
 - **Schema:** `TreemapExtraction` → `nodes: list[TreemapNode(label, parent, value)]`
 - **Slots:** `[("Technology|Apple", 3050.0), ("Technology|Microsoft", 3100.0), ...]`  label = `"{parent}|{label}"`
+
+---
+
+## No-label variants (4)
+
+Identical charts with axis tick labels removed. Same schema and slot format as the original — evaluator behaviour is unchanged.
+
+| Chart type | Based on |
+|---|---|
+| `bar_vertical_nolabel` | `bar_vertical` |
+| `bar_horizontal_nolabel` | `bar_horizontal` |
+| `histogram_nolabel` | `histogram` |
+| `subplots_2x2_nolabel` | `subplots_2x2` |
+
+---
+
+## New chart types (4)
+
+| Chart type | Schema | Description |
+|---|---|---|
+| `log_log_scatter` | `ScatterChartExtraction` | Scatter with both axes log-scaled; slots: `("{label}|x", x)` + `("{label}|y", y)` |
+| `dense_scatter` | `ScatterChartExtraction` | High-density scatter; same slot format as `log_log_scatter` |
+| `line_multi_series` | `LineChartExtraction` | Line chart with many overlapping series; slots: `("{series}|{x}", y)` |
+| `dense_line` | `LineChartExtraction` | Dense multi-series line; same slot format as `line_multi_series` |
 
 ---
 
