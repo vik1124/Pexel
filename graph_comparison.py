@@ -40,7 +40,7 @@ def _evaluate_cache_key(_context, parameters: dict) -> str:
     extracted = parameters['extract_data']
     encoded_str = extracted["extracted"].model_dump_json().encode('utf-8')
     data_hash = hashlib.md5(encoded_str).hexdigest()
-    return f"evaluate/{data_hash}/{model}/{parameters['resolution']}"
+    return f"evaluate/{data_hash}/{model}/{parameters['extract_data']['resolution']}"
 
 
 
@@ -170,7 +170,10 @@ def evaluate_extraction():
         "openai:gpt-5.5", 
         "openai:gpt-5.6-luna", 
         "openai:gpt-5.6-terra", 
-        "openai:gpt-5.6-sol", 
+        "openai:gpt-5.6-sol",
+        "openai:gpt-6-astra",
+        "openai:gpt-6.1-sol",
+        "openai:gpt-6-luna",
         "anthropic:claude-sonnet-5", 
         "anthropic:claude-opus-5",
         "openrouter:qwen/qwen3.8-27b",
@@ -190,7 +193,7 @@ def evaluate_extraction():
     extracts = extract.map(chart_type=[x[0] for x in inputs], model=[x[1] for x in inputs])
     evaluation = evaluate.map(extract_data=extracts.result())
     results.extend(evaluation.result())
-    print(results)
+    #print(results)
     
     create_table_artifact(
         key="result",
@@ -201,6 +204,19 @@ def evaluate_extraction():
     pd.DataFrame(results).to_csv(
         cfg.CHARTS_DIR / f"results.csv", index=False
     )
+
+    for ext in extracts.result():
+        chart_type = ext["chart_type"]
+        extracted = ext["extracted"]
+        model = ext["model"].replace(":", "_").replace("/", "_")
+        resolution = ext["resolution"]
+        try:
+            with open(cfg.CHARTS_DIR / resolution / f"{chart_type}_{model}.json", "w", encoding='utf-8') as f:
+                f.write(extracted.model_dump_json())
+                
+        except Exception as e:
+            print(f"{chart_type}-{model}: {e}")
+            pass
 
 
 
