@@ -18,4 +18,5 @@ dependencies = [
     "httpx>=0.24.0",
     "nbformat>=5.11.1",
     "pandoc>=2.4",
+    "nbconvert[webpdf]>=7.17.2",
 ]

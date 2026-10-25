@@ -33,14 +33,17 @@ def _extract_cache_key(_context, parameters: dict) -> str:
     h.update((_HERE / "llm_extractor.py").read_bytes())
     h.update((_HERE / "schemas.py").read_bytes())
     h.update((cfg.CHARTS_DIR / parameters["resolution"] / f"{parameters['chart_type']}.png").read_bytes())
-    return f"extract/{parameters['chart_type']}/{model}/{parameters['resolution']}-{h.hexdigest()}"
+    if parameters["chart_type"] not in ["bar_horizontal", "histogram_nolabel"]:
+        return f"extract/{parameters['chart_type']}/{model}/{parameters['resolution']}-{h.hexdigest()}"
+    else:
+        return f"extract_rerun/{parameters['chart_type']}/{model}/{parameters['resolution']}-{h.hexdigest()}"
 
 def _evaluate_cache_key(_context, parameters: dict) -> str:
     model = parameters["extract_data"]["model"].replace(":", "_")
     extracted = parameters['extract_data']
     encoded_str = extracted["extracted"].model_dump_json().encode('utf-8')
     data_hash = hashlib.md5(encoded_str).hexdigest()
-    return f"evaluate/{data_hash}/{model}/{parameters['extract_data']['resolution']}"
+    return f"evaluate_rmse/{data_hash}/{model}/{parameters['extract_data']['resolution']}"
 
 
 
@@ -113,13 +116,14 @@ async def evaluate(
                         chart_type=chart_type,
                         ground_truth=chart.ground_truth,
                         extracted=extracted,
-                        model_name="openai:gpt-5.6-luna",
+                        model_name="openai:gpt-6-luna",
                     )
             evaluator = "llm"
     else:
         metrics = {
             "precision": 0.0, "recall": 0.0, "f1": 0.0, "accuracy": 0.0,
             "tp": 0, "fp": 0, "fn": 0, "total_gt": 0,
+            "rmse": None, "mape": None, "pearson": None,
         }
         comparison_rows = []
         print(f" FAILED: {llm_meta.get('error', '?')[:80]}")
@@ -131,7 +135,8 @@ async def evaluate(
         description=(
             f"{chart_type} | {resolution} | {model} — "
             f"P={metrics['precision']:.2f} R={metrics['recall']:.2f} F1={metrics['f1']:.2f} "
-            f"(TP={metrics['tp']} FP={metrics['fp']} FN={metrics['fn']})"
+            f"(TP={metrics['tp']} FP={metrics['fp']} FN={metrics['fn']}) | "
+            f"RMSE={metrics['rmse']} MAPE={metrics['mape']}% r={metrics['pearson']}"
         ),
     )
     pd.DataFrame(comparison_rows).to_csv(cfg.CHARTS_DIR / resolution / f"{artifact_key}.csv", index=False)

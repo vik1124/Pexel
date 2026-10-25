@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from pydantic_ai.capabilities import Thinking
 
-from evaluator import _pred_slots, _metrics
+from evaluator import _pred_slots, _metrics, _regression_metrics
 
 
 class SlotComparison(BaseModel):
@@ -60,14 +60,18 @@ async def evaluate_with_llm(
             {"status": "extra (pred only)", "label": pl or "", "gt_value": "", "extracted_value": pv, "diff": ""}
             for pl, pv in pred_slots
         ]
-        return _metrics(0, len(pred_slots), 0), rows
+        m = _metrics(0, len(pred_slots), 0)
+        m.update({"rmse": None, "mape": None, "pearson": None})
+        return m, rows
 
     if not pred_slots:
         rows = [
             {"status": "missed (GT only)", "label": gl or "", "gt_value": gv, "extracted_value": "", "diff": ""}
             for gl, gv in gt_slots
         ]
-        return _metrics(0, 0, len(gt_slots)), rows
+        m = _metrics(0, 0, len(gt_slots))
+        m.update({"rmse": None, "mape": None, "pearson": None})
+        return m, rows
 
     prompt = (
         f"Chart type: {chart_type}\n\n"
@@ -112,4 +116,13 @@ async def evaluate_with_llm(
                 "comment":         cmp.comment,
             })
 
-    return _metrics(llm_result.tp, llm_result.fp, llm_result.fn, llm_result.comment), rows
+    matched_pairs = [
+        (row["gt_value"], row["extracted_value"])
+        for row in rows
+        if row["status"] == "match"
+        and isinstance(row["gt_value"], (int, float))
+        and isinstance(row["extracted_value"], (int, float))
+    ]
+    m = _metrics(llm_result.tp, llm_result.fp, llm_result.fn, llm_result.comment)
+    m.update(_regression_metrics(matched_pairs))
+    return m, rows

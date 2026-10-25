@@ -16,6 +16,7 @@ A match is a True Positive only if the numeric value is also within TOLERANCE.
 
 from __future__ import annotations
 
+import math
 from difflib import SequenceMatcher
 from typing import Any
 
@@ -54,6 +55,34 @@ def _within(gt: float, pred: float, tol: float = NUMERIC_TOLERANCE) -> bool:
         return True
     denom = abs(gt) if gt != 0 else abs(pred)
     return abs(gt - pred) / denom <= tol
+
+
+def _regression_metrics(pairs: list[tuple[float, float]]) -> dict:
+    """RMSE, MAPE (%), and Pearson r on matched (gt, pred) value pairs."""
+    if len(pairs) < 2:
+        return {"rmse": None, "mape": None, "pearson": None}
+
+    n = len(pairs)
+    gt   = [p[0] for p in pairs]
+    pred = [p[1] for p in pairs]
+
+    rmse = math.sqrt(sum((g - p) ** 2 for g, p in pairs) / n)
+
+    nonzero = [(g, p) for g, p in pairs if g != 0]
+    mape = (sum(abs(g - p) / abs(g) for g, p in nonzero) / len(nonzero) * 100) if nonzero else None
+
+    mean_gt   = sum(gt) / n
+    mean_pred = sum(pred) / n
+    num       = sum((g - mean_gt) * (p - mean_pred) for g, p in pairs)
+    den_gt    = math.sqrt(sum((g - mean_gt) ** 2 for g in gt))
+    den_pred  = math.sqrt(sum((p - mean_pred) ** 2 for p in pred))
+    pearson   = (num / (den_gt * den_pred)) if den_gt > 0 and den_pred > 0 else None
+
+    return {
+        "rmse":    round(rmse, 4),
+        "mape":    round(mape, 4) if mape is not None else None,
+        "pearson": round(pearson, 4) if pearson is not None else None,
+    }
 
 
 def _metrics(tp: int, fp: int, fn: int, comment:str ="") -> dict:
@@ -368,7 +397,18 @@ def evaluate_detail(
             {"status": "extra (pred only)", "label": pl or "", "gt_value": "", "extracted_value": pv, "diff": ""}
             for pl, pv in pred_s
         ]
-        return _metrics(0, len(pred_s), 0), rows
+        m = _metrics(0, len(pred_s), 0)
+        m.update({"rmse": None, "mape": None, "pearson": None})
+        return m, rows
 
     tp, fp, fn, rows = _match_detail(gt_s, pred_s)
-    return _metrics(tp, fp, fn), rows
+    matched_pairs = [
+        (row["gt_value"], row["extracted_value"])
+        for row in rows
+        if row["status"] == "match"
+        and isinstance(row["gt_value"], (int, float))
+        and isinstance(row["extracted_value"], (int, float))
+    ]
+    m = _metrics(tp, fp, fn)
+    m.update(_regression_metrics(matched_pairs))
+    return m, rows
